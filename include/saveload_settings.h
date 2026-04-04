@@ -84,8 +84,8 @@ public:
     void (TargetClass::*set_recall_enabled)(bool) = nullptr,
     void (TargetClass::*set_save_enabled)(bool) = nullptr
   ) {
-    label = lbl;
-    category_name = category;
+    set_label(lbl);
+    set_category(category);
     target = tgt;
     variable = var;
     setter_func = setter;
@@ -117,7 +117,6 @@ public:
   }
 
   bool parse_key_value(const char* key, const char* value) override {
-    sl_trim_inplace(value); // remove whitespace and CR/LF which may be present in file-based loading
     if (strcmp(key, label) != 0) return false;
 
     bool can_recall = recall_enabled;
@@ -179,8 +178,8 @@ public:
     set_recall_func_t set_recall_callable = {},
     set_save_func_t   set_save_callable  = {}
   ) {
-    label         = lbl;
-    category_name = category;
+    set_label(lbl);
+    set_category(category);
     variable      = var;
     setter        = setter_callable;
     getter        = getter_callable;

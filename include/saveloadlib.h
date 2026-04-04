@@ -3,9 +3,6 @@
 #pragma once
 #include <Arduino.h>
 
-extern const char *warning_label;
-extern char linebuf[128];
-
 // Platform file systems
 #if defined(ENABLE_SD)
   #include <SD.h>
@@ -14,21 +11,23 @@ extern char linebuf[128];
   #include <LittleFS.h>
 #endif
 
-#include <cstdint>
-#include <cstddef>
-#include <cstring>
+// #include <cstdint>
+// #include <cstddef>
+// #include <cstring>
 
 // Tune these for your device
 #ifndef SL_MAX_CHILDREN
-#define SL_MAX_CHILDREN 12
+#define SL_MAX_CHILDREN 24
 #endif
 #ifndef SL_MAX_SETTINGS
 #define SL_MAX_SETTINGS 24
 #endif
 #ifndef SL_MAX_LINE
-#define SL_MAX_LINE 512
+#define SL_MAX_LINE 256
 #endif
 
+extern const char *warning_label;
+extern char linebuf[SL_MAX_LINE];
 
 // trim in-place (removes leading/trailing whitespace and CR/LF)
 static inline void sl_trim_inplace(char* s) {
@@ -51,17 +50,30 @@ static inline uint16_t sl_fnv1a_16(const char* s) {
   return (uint16_t)((h >> 16) ^ (h & 0xFFFF));
 }
 
+#ifndef SL_MAX_LABEL
+#define SL_MAX_LABEL 48
+#endif
+
 struct SaveableSettingBase {
-  const char* label;
-  const char* category_name;
+  char label[SL_MAX_LABEL] = {};       // owned copy - safe against temporaries at construction
+  const char* category_name = "";     // always a string literal, pointer is fine
+
+  void set_label(const char* lbl) {
+    if (lbl) strncpy(label, lbl, SL_MAX_LABEL - 1);
+    label[SL_MAX_LABEL - 1] = '\0';
+  }
+  void set_category(const char* cat) {
+    category_name = cat ? cat : "";
+  }
+
   virtual const char* get_line() = 0; // returns "key=value" or "value"
   virtual bool parse_key_value(const char* key, const char* value) = 0;
   virtual ~SaveableSettingBase() {}
 };
 
 struct ISaveableSettingHost {
-  const char* path_segment;
-  uint16_t seg_hash;
+  const char* path_segment = "";
+  uint16_t seg_hash = 0;
 
   struct ChildEntry { ISaveableSettingHost* host; const char* seg; uint16_t hash; };
   struct SettingEntry  { SaveableSettingBase* setting; const char* key; uint16_t hash; };
@@ -75,7 +87,7 @@ struct ISaveableSettingHost {
   virtual void set_path_segment(const char* seg) { path_segment = seg; seg_hash = sl_fnv1a_16(seg); }
 
   void register_child(ISaveableSettingHost* child) {
-    if (child_count < SL_MAX_CHILDREN) {
+    if (child_count < SL_MAX_CHILDREN && child && child->path_segment) {
       children[child_count].host = child;
       children[child_count].seg = child->path_segment;
       children[child_count].hash = sl_fnv1a_16(child->path_segment);
@@ -84,7 +96,7 @@ struct ISaveableSettingHost {
   }
   // returns true on success (added or replaced), false on overflow or invalid input
   bool register_setting(SaveableSettingBase* setting, bool allow_replace = false) {
-    if (!setting || !setting->label) return false;
+    if (!setting || setting->label[0] == '\0') return false;
 
     if (allow_replace) {
       if (replace_setting_by_label(setting->label, setting)) return true;
@@ -110,8 +122,6 @@ struct ISaveableSettingHost {
   // helper find
   int find_setting_index(const char* label) {
     if (!label) return -1;
-    sl_trim_inplace((char*)label);
-
     uint16_t h = sl_fnv1a_16(label);
     for (int i = 0; i < (int)setting_count; ++i) {
       if (settings[i].hash == h && strcmp(settings[i].key, label) == 0) return i;
@@ -146,19 +156,20 @@ struct ISaveableSettingHost {
 
   // Save recursion
   virtual void save_recursive(char* prefix, size_t prefix_len, void (*output_cb)(const char*)) {
-    char out[SL_MAX_LINE];
+    static char out[SL_MAX_LINE];  // safe static: written then immediately consumed before recursion
     for (uint8_t i = 0; i < setting_count; ++i) {
       const char* kv = settings[i].setting->get_line();
       const char* val = strchr(kv, '=') ? strchr(kv, '=') + 1 : kv;
       if (prefix_len == 0) {
-        snprintf(out, sizeof(out), "%s=%s", settings[i].key, val);
+        snprintf(out, SL_MAX_LINE, "%s=%s", settings[i].key, val);
       } else {
-        snprintf(out, sizeof(out), "%s~%s=%s", prefix, settings[i].key, val);
+        snprintf(out, SL_MAX_LINE, "%s~%s=%s", prefix, settings[i].key, val);
       }
       output_cb(out);
     }
     for (uint8_t c = 0; c < child_count; ++c) {
-      char newpref[SL_MAX_LINE];
+      if (!children[c].host || !children[c].seg) continue;
+      char newpref[SL_MAX_LABEL * 4];  // fits max nesting depth with short segment names
       if (prefix_len == 0) snprintf(newpref, sizeof(newpref), "%s", children[c].seg);
       else snprintf(newpref, sizeof(newpref), "%s~%s", prefix, children[c].seg);
       children[c].host->save_recursive(newpref, strlen(newpref), output_cb);

@@ -3,7 +3,7 @@
 
 const char *warning_label = " - WARNING: no target nor getter func!";
 
-char linebuf[128];  // shared buffer for constructing lines to save
+char linebuf[SL_MAX_LINE];  // shared buffer for constructing lines to save
 
 int sl_tokenise_inplace(char* left, char* segs[], int max_segs) {
   int count = 0;
