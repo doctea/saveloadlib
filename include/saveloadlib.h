@@ -4,6 +4,7 @@
 #include <Arduino.h>
 
 extern const char *warning_label;
+extern char linebuf[128];
 
 // Platform file systems
 #if defined(ENABLE_SD)
@@ -42,6 +43,9 @@ static inline void sl_trim_inplace(char* s) {
 }
 
 static inline uint16_t sl_fnv1a_16(const char* s) {
+  if (!s) {
+    return 0;
+  }
   uint32_t h = 2166136261u;
   while (*s) { h ^= (uint8_t)*s++; h *= 16777619u; }
   return (uint16_t)((h >> 16) ^ (h & 0xFFFF));
@@ -67,6 +71,8 @@ struct ISaveableSettingHost {
 
   SettingEntry settings[SL_MAX_SETTINGS];
   uint8_t setting_count = 0;
+
+  virtual void set_path_segment(const char* seg) { path_segment = seg; seg_hash = sl_fnv1a_16(seg); }
 
   void register_child(ISaveableSettingHost* child) {
     if (child_count < SL_MAX_CHILDREN) {
@@ -195,3 +201,34 @@ bool sl_parse_line_buffer(char* linebuf);
 // File IO helpers declared below in implementation
 bool sl_load_from_file(const char* path);
 bool sl_save_to_file(ISaveableSettingHost* root, const char* path);
+
+// Recursively ensure seg_hash is set and call setup_saveable_settings on each node.
+// This function does not modify child arrays beyond calling the virtual setup method.
+static void sl_compute_hashes_recursive(ISaveableSettingHost* host) {
+  if (!host) return;
+  if (!host->path_segment) return;
+  // If seg_hash is zero, compute it now. Allow user to precompute if desired.
+  if (host->seg_hash == 0) host->seg_hash = sl_fnv1a_16(host->path_segment);
+  for (uint8_t i = 0; i < host->child_count; ++i) {
+    sl_compute_hashes_recursive(host->children[i].host);
+  }
+}
+
+// Walk the tree and call setup_saveable_settings on each host.
+// The order is parent first, then children, matching the inheritance pattern.
+void sl_setup_all(ISaveableSettingHost* root);
+
+static inline void sl_register_and_setup_root(ISaveableSettingHost* r) {
+  sl_register_root(r);
+  sl_setup_all(r);
+}
+
+
+// Print callback signature for each setting line
+using SL_PrintCallback = void(*)(const char* line, void* user_ctx);
+
+// Print the whole tree to an Arduino Print object (Serial, etc.)
+void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_depth = 8);
+
+// Walk the tree and call a callback for each printed line
+void sl_print_tree_with_callback(ISaveableSettingHost* root, SL_PrintCallback cb, void* user_ctx = nullptr, uint8_t max_depth = 8);

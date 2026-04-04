@@ -52,7 +52,6 @@ static inline bool sl_callable_valid(const C& c) {
   return (bool)c;
 }
 
-
 // -------------------- SaveableSetting (member-function based) --------------------
 template<class TargetClass, class DataType>
 class SaveableSetting : public SaveableSettingBase {
@@ -70,7 +69,6 @@ public:
 
   bool recall_enabled = true;
   bool save_enabled = true;
-  mutable char linebuf[96];
 
   SaveableSetting(
     const char* lbl,
@@ -169,7 +167,6 @@ public:
   DataType* variable = nullptr;
   bool recall_enabled = true;
   bool save_enabled = true;
-  mutable char linebuf[96];
 
   LSaveableSetting(
     const char* lbl,
