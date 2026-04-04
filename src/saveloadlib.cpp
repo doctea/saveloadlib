@@ -3,6 +3,8 @@
 
 const char *warning_label = " - WARNING: no target nor getter func!";
 
+ISaveableSettingHost* SL_ROOT = nullptr;  // single definition; extern-declared in saveloadlib.h
+
 char linebuf[SL_MAX_LINE];  // shared buffer for constructing lines to save
 
 int sl_tokenise_inplace(char* left, char* segs[], int max_segs) {
@@ -18,10 +20,21 @@ int sl_tokenise_inplace(char* left, char* segs[], int max_segs) {
 }
 
 bool sl_parse_line_buffer(char* linebuf) {
+  if (!SL_ROOT) 
+    return false;
+
   size_t L = strlen(linebuf);
-  while (L && (linebuf[L-1] == '\n' || linebuf[L-1] == '\r')) linebuf[--L] = '\0';
+
+  // strip trailing newlines just in case
+  while (L && (linebuf[L-1] == '\n' || linebuf[L-1] == '\r')) 
+    linebuf[--L] = '\0';
+ 
+  // find '=' to split at; return if not found
   char* eq = strchr(linebuf, '=');
-  if (!eq) return false;
+  if (!eq) 
+    return false;
+
+  // split in place and set pointers
   *eq = '\0';
   char* left = linebuf;
   char* value = eq + 1;
@@ -30,8 +43,7 @@ bool sl_parse_line_buffer(char* linebuf) {
   static char* segs[MAX_SEGS];
   int seg_count = sl_tokenise_inplace(left, segs, MAX_SEGS);
   if (seg_count <= 0) return false;
-  if (!SL_ROOT) return false;
-
+  
   if (SL_ROOT->path_segment && strcmp(SL_ROOT->path_segment, segs[0]) == 0) {
     return SL_ROOT->load_line(segs + 1, seg_count - 1, value);
   } else {
@@ -50,11 +62,14 @@ bool sl_load_from_file(const char* path) {
   return false;
 #endif
   if (!f) return false;
+
   while (f.available()) {
     size_t n = f.readBytesUntil('\n', linebuf, sizeof(linebuf) - 1);
     linebuf[n] = '\0';
+    //Serial.printf("Read line: %s\n", linebuf);
     sl_parse_line_buffer(linebuf);
-    yield();
+    //yield();
+    //break; // for testing, only read one line to avoid running into crashes
   }
   f.close();
   return true;
@@ -90,7 +105,7 @@ bool sl_save_to_file(ISaveableSettingHost* root, const char* path) {
 
 void sl_setup_all(ISaveableSettingHost* root) {
   //Serial.printf("sl_setup_all() for root %p aka %s\n", root, root ? root->path_segment : "null"); Serial.flush();
-  //if (!root) return;
+  if (!root) return;
   // Ensure hashes are computed so replace/find operations are fast during setup.
   sl_compute_hashes_recursive(root);
 
@@ -183,4 +198,29 @@ void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_
 void sl_print_tree_with_callback(ISaveableSettingHost* root, SL_PrintCallback cb, void* user_ctx, uint8_t max_depth) {
   if (!root || !cb) return;
   sl_print_recursive(root, "", cb, user_ctx, 0, max_depth);
+}
+
+
+
+
+
+void debug_print_file(const char *filename) {
+  #ifdef ENABLE_SD
+    File f = SD.open(filename, FILE_READ);
+  #elif defined(ENABLE_LITTLEFS)
+    File f = LittleFS.open("/slots/preset-0.txt", "r");
+  #else
+    Serial.println("No filesystem enabled for debug_print_file");
+    return;
+  #endif
+    if (f) {
+       Serial.printf("###################\ndebug_print_file showing contents of %s:\n", "/slots/preset-0.txt");
+       while (f.available()) {
+           Serial.write(f.read());
+       }
+       f.close();
+        Serial.printf("debug_print_file: Finished showing contents of %s\n", filename);
+    } else {
+       Serial.printf("debug_print_file: File '%s' does not exist", filename);
+    }
 }

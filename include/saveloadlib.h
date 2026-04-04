@@ -73,6 +73,8 @@ struct SaveableSettingBase {
 
 struct ISaveableSettingHost {
   const char* path_segment = "";
+  static constexpr size_t PATH_SEG_MAX = 32;
+  char path_segment_buf[PATH_SEG_MAX] = {};
   uint16_t seg_hash = 0;
 
   struct ChildEntry { ISaveableSettingHost* host; const char* seg; uint16_t hash; };
@@ -84,7 +86,26 @@ struct ISaveableSettingHost {
   SettingEntry settings[SL_MAX_SETTINGS];
   uint8_t setting_count = 0;
 
-  virtual void set_path_segment(const char* seg) { path_segment = seg; seg_hash = sl_fnv1a_16(seg); }
+  virtual void set_path_segment(const char* seg) {
+    if (!seg) { 
+      path_segment_buf[0] = '\0'; 
+      this->path_segment = path_segment_buf; 
+      return; 
+    }
+    strncpy(path_segment_buf, seg, PATH_SEG_MAX - 1);
+    path_segment_buf[PATH_SEG_MAX - 1] = '\0';
+    this->path_segment = path_segment_buf;
+    this->seg_hash = sl_fnv1a_16(this->path_segment);
+  }
+
+  virtual void set_path_segment_fmt(const char *fmt, ... ) {
+    char buf[PATH_SEG_MAX];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, PATH_SEG_MAX, fmt, args);
+    va_end(args);
+    set_path_segment(buf);
+  }
 
   void register_child(ISaveableSettingHost* child) {
     if (child_count < SL_MAX_CHILDREN && child && child->path_segment) {
@@ -201,8 +222,8 @@ struct ISaveableSettingHost {
   virtual ~ISaveableSettingHost() {}
 };
 
-// Root pointer
-static ISaveableSettingHost* SL_ROOT = nullptr;
+// Root pointer - single definition in saveloadlib.cpp, extern here so all TUs share the same instance
+extern ISaveableSettingHost* SL_ROOT;
 static inline void sl_register_root(ISaveableSettingHost* r) { SL_ROOT = r; }
 
 // Parser helpers
@@ -243,3 +264,6 @@ void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_
 
 // Walk the tree and call a callback for each printed line
 void sl_print_tree_with_callback(ISaveableSettingHost* root, SL_PrintCallback cb, void* user_ctx = nullptr, uint8_t max_depth = 8);
+
+
+void debug_print_file(const char *filename);
