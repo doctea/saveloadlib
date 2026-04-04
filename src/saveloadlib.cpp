@@ -202,25 +202,40 @@ void sl_print_tree_with_callback(ISaveableSettingHost* root, SL_PrintCallback cb
 
 
 
-
+#include "SimplyAtomic.h"
 
 void debug_print_file(const char *filename) {
-  #ifdef ENABLE_SD
-    File f = SD.open(filename, FILE_READ);
-  #elif defined(ENABLE_LITTLEFS)
-    File f = LittleFS.open("/slots/preset-0.txt", "r");
-  #else
-    Serial.println("No filesystem enabled for debug_print_file");
-    return;
-  #endif
+  // for some reason we still get that fucking problem where the system freezes when we try to 
+  // output lots of serial :/ especially when the app is running, rather than during setup()..
+  // tried atomic, yielding, waiting for avail, delays, flushing... nothing seems to fix it
+  // dont know what else to try!
+  // ATOMIC() {
+    Serial.printf("debug_print_file: Attempting to open file '%s' for reading...\n", filename);
+    // //Serial.flush();
+    #ifdef ENABLE_SD
+      File f = SD.open(filename, FILE_READ);
+    #elif defined(ENABLE_LITTLEFS)
+      File f = LittleFS.open(filename, "r");
+    #else
+      Serial.println("No filesystem enabled for debug_print_file");
+      return;
+    #endif
+
     if (f) {
-       Serial.printf("###################\ndebug_print_file showing contents of %s:\n", "/slots/preset-0.txt");
-       while (f.available()) {
-           Serial.write(f.read());
-       }
-       f.close();
-        Serial.printf("debug_print_file: Finished showing contents of %s\n", filename);
+      Serial.print("###\ndebug_print_file showing contents of ");
+      Serial.println(filename);
+      while (f.available()) {
+          Serial.write(f.read());
+          //delay(1);
+          //yield();
+          //Serial.flush();
+      }
+      f.close();
+      Serial.printf("debug_print_file: Finished showing contents of %s\n", filename);
+      //Serial.flush();
     } else {
-       Serial.printf("debug_print_file: File '%s' does not exist", filename);
+      Serial.printf("debug_print_file: File '%s' does not exist", filename);
+      //Serial.flush();
     }
+  // }
 }

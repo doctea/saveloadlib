@@ -41,6 +41,8 @@ static inline T sl_parse_from_cstr(const char* s) {
     return (T)atof(s);
   } else if constexpr (__is_enum(T)) {
     return (T)(int)atoll(s);
+  } else if constexpr (sl_is_same<T, const char*>::value) {
+    return s;
   } else {
     static_assert(!sl_is_same<T, T>::value, "No generic parser for this type; specialise or implement custom setting");
   }
@@ -112,6 +114,10 @@ public:
       snprintf(linebuf, sizeof(linebuf), "%s=%lld", label, (long long)v);
     } else if constexpr (sl_is_floating_point<DataType>::value) {
       snprintf(linebuf, sizeof(linebuf), "%s=%.6g", label, (double)v);
+    } else if constexpr (__is_enum(DataType)) {
+      snprintf(linebuf, sizeof(linebuf), "%s=%lld", label, (long long)v);
+    } else if constexpr (sl_is_same<DataType, const char*>::value) {
+      snprintf(linebuf, sizeof(linebuf), "%s=%s", label, v ? v : "");
     } else {
       snprintf(linebuf, sizeof(linebuf), "%s=0", label);
     }
@@ -202,6 +208,10 @@ public:
       snprintf(linebuf, sizeof(linebuf), "%s=%lld", label, (long long)v);
     } else if constexpr (sl_is_floating_point<DataType>::value) {
       snprintf(linebuf, sizeof(linebuf), "%s=%.6g", label, (double)v);
+    } else if constexpr (__is_enum(DataType)) {
+      snprintf(linebuf, sizeof(linebuf), "%s=%lld", label, (long long)v);
+    } else if constexpr (sl_is_same<DataType, const char*>::value) {
+      snprintf(linebuf, sizeof(linebuf), "%s=%s", label, v ? v : "");
     } else {
       snprintf(linebuf, sizeof(linebuf), "%s=0", label);
     }
