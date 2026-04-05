@@ -233,9 +233,22 @@ struct ISaveableSettingHost {
 // Provides inline storage for NCH children and NSET settings; injects pointers
 // into ISaveableSettingHost so all virtual methods work without change.
 // NCH=0 is legal (leaf nodes with no children).
+//
+// Uses VIRTUAL inheritance from ISaveableSettingHost so that a subclass can
+// override the sizing by ALSO inheriting SHStorage<larger_NCH, larger_NSET>:
+//
+//   class Base    : public SHStorage<0, 6>  { ... };   // 6 settings when used directly
+//   class Derived : public Base,
+//                   public SHStorage<0, 14> { ... };   // 14 settings - overrides Base's 6
+//
+// The most-derived SHStorage constructor runs last and wins. The parent's inline
+// arrays still exist in memory (unavoidable), so reserve this pattern for cases
+// where the base is sometimes used directly with small sizing AND a subclass
+// occasionally needs significantly more. For simple cases, just size the base
+// class generously to cover all subclasses.
 // ---------------------------------------------------------------------------
 template<uint8_t NCH, uint8_t NSET>
-struct SHStorage : public ISaveableSettingHost {
+struct SHStorage : virtual public ISaveableSettingHost {
   // GCC zero-size arrays (arm-none-eabi extension) are used when NCH=0;
   // children pointer is set to nullptr in that case.
   ChildEntry   _ch[NCH];   // zero-size when NCH=0; GCC extension, fine on RP2040
