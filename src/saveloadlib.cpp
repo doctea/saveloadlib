@@ -51,7 +51,7 @@ int sl_tokenise_inplace(char* left, char* segs[], int max_segs) {
   return count;
 }
 
-bool sl_parse_line_buffer(char* linebuf) {
+bool sl_parse_line_buffer(char* linebuf, sl_scope_t scope) {
   if (!SL_ROOT) 
     return false;
 
@@ -77,14 +77,15 @@ bool sl_parse_line_buffer(char* linebuf) {
   if (seg_count <= 0) return false;
   
   if (SL_ROOT->path_segment && strcmp(SL_ROOT->path_segment, segs[0]) == 0) {
-    return SL_ROOT->load_line(segs + 1, seg_count - 1, value);
+    return SL_ROOT->load_line(segs + 1, seg_count - 1, value, scope);
   } else {
-    return SL_ROOT->load_line(segs, seg_count, value);
+    return SL_ROOT->load_line(segs, seg_count, value, scope);
   }
 }
 
-// Arduino SD/LittleFS streaming loader
-bool sl_load_from_file(const char* path) {
+// Arduino SD/LittleFS streaming loader.
+// scope: only settings whose mask intersects scope are applied.
+bool sl_load_from_file(const char* path, sl_scope_t scope) {
   char linebuf[SL_MAX_LINE];
 #if defined(ENABLE_SD)
   File f = SD.open(path, FILE_READ);
@@ -98,22 +99,19 @@ bool sl_load_from_file(const char* path) {
   while (f.available()) {
     size_t n = f.readBytesUntil('\n', linebuf, sizeof(linebuf) - 1);
     linebuf[n] = '\0';
-    //Serial.printf("Read line: %s\n", linebuf);
-    sl_parse_line_buffer(linebuf);
-    //yield();
-    //break; // for testing, only read one line to avoid running into crashes
+    sl_parse_line_buffer(linebuf, scope);
   }
   f.close();
   return true;
 }
 
 // LinkedList<String> loader (for testing with in-memory data, or from other sources like Serial)
-bool sl_load_from_linkedlist(const char* path, const LinkedList<String>& lines) {
+bool sl_load_from_linkedlist(const char* path, const LinkedList<String>& lines, sl_scope_t scope) {
   char linebuf[SL_MAX_LINE];
   for (int i = 0; i < lines.size(); i++) {
     String line = lines.get(i);
     line.toCharArray(linebuf, sizeof(linebuf));
-    sl_parse_line_buffer(linebuf);
+    sl_parse_line_buffer(linebuf, scope);
   }
   return true;
 }
@@ -137,13 +135,34 @@ struct FileWriter {
 
 static void sl_file_output_cb(const char* line) { globalFileWriter.writeLine(line); }
 
-bool sl_save_to_file(ISaveableSettingHost* root, const char* path) {
+// Save the tree to a file.
+// scope: only settings whose mask intersects scope are written.
+bool sl_save_to_file(ISaveableSettingHost* root, const char* path, sl_scope_t scope) {
   if (!root) return false;
   if (!globalFileWriter.begin(path)) return false;
   char prefix[1] = {0};
-  root->save_recursive(prefix, 0, sl_file_output_cb);
+  root->save_recursive(prefix, 0, sl_file_output_cb, scope);
   globalFileWriter.end();
   return true;
+}
+
+// Save each scope to its configured file.
+bool sl_save_all_scopes(ISaveableSettingHost* root, const SL_ScopeTarget* targets, uint8_t count) {
+  if (!root || !targets) return false;
+  bool ok = true;
+  for (uint8_t i = 0; i < count; ++i)
+    ok &= sl_save_to_file(root, targets[i].path, targets[i].scope);
+  return ok;
+}
+
+// Load each scope from its configured file in the order provided.
+// Canonical order: system → project → pattern (later loads override earlier ones).
+bool sl_load_all_scopes(const SL_ScopeTarget* targets, uint8_t count) {
+  if (!targets) return false;
+  bool ok = true;
+  for (uint8_t i = 0; i < count; ++i)
+    ok &= sl_load_from_file(targets[i].path, targets[i].scope);
+  return ok;
 }
 
 void sl_setup_all(ISaveableSettingHost* root) {

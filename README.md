@@ -81,6 +81,8 @@ sl_load_from_file("/save/slot0.txt");
 
 Both functions use `SL_ROOT` by default for load routing. Save takes an explicit root pointer so you can save subtrees independently.
 
+An optional `scope` argument controls which settings are visited (see [Save Scopes](#save-scopes) below). Omitting it defaults to `SL_SCOPE_ALL`, which visits every setting — preserving backward compatibility.
+
 ---
 
 ## Registering Settings
@@ -140,6 +142,86 @@ virtual void setup_saveable_settings() override {
 ```
 
 Each child must have its `path_segment` set before being registered (call `set_path_segment("name")` or `set_path_segment_fmt("pattern_%i", i)` in the child's constructor).
+
+---
+
+## Save Scopes
+
+Each registered setting slot carries a small bitmask (`sl_scope_t`) that identifies which save/load scopes it participates in. Save and load operations accept a scope mask and only visit slots whose mask intersects the requested mask. This allows different parts of the tree to be written to different files — for example a device-global system file, a per-project file, and a per-pattern file.
+
+### Scope constants
+
+| Constant | Bit | Intended use |
+|---|---|---|
+| `SL_SCOPE_SYSTEM`  | `0x01` | Device-wide settings (MIDI channel, clock source, …) |
+| `SL_SCOPE_PROJECT` | `0x02` | Per-project / per-song settings |
+| `SL_SCOPE_PATTERN` | `0x04` | Per-pattern settings |
+| `SL_SCOPE_ALL`     | `0xFF` | **Default** — slot participates in every scope |
+
+Bits `0x08`–`0x80` are reserved for future levels.
+
+### Tagging settings with a scope
+
+Pass a scope mask as the optional third argument to `register_setting`. Omitting it defaults to `SL_SCOPE_ALL`, so existing code is unaffected.
+
+```cpp
+virtual void setup_saveable_settings() override {
+    ISaveableSettingHost::setup_saveable_settings();
+
+    // belongs to every scope (default)
+    register_setting(new LSaveableSetting<bool>("enabled", "MyClass", &this->enabled));
+
+    // only saved/loaded as part of the system file
+    register_setting(new LSaveableSetting<uint8_t>("midi_channel", "MyClass", &this->midi_ch),
+                     false, SL_SCOPE_SYSTEM);
+
+    // saved in both project and pattern files
+    register_setting(new LSaveableSetting<float>("volume", "MyClass", &this->volume),
+                     false, SL_SCOPE_PROJECT | SL_SCOPE_PATTERN);
+}
+```
+
+The mask belongs to the **slot**, not the setting object. If you replace a setting object later with `replace_setting_by_label`, the existing mask is preserved automatically.
+
+### Saving and loading a single scope
+
+Pass a scope to `sl_save_to_file` / `sl_load_from_file`:
+
+```cpp
+// Save only system settings
+sl_save_to_file(SL_ROOT, "/save/system.txt", SL_SCOPE_SYSTEM);
+
+// Load only project settings (won't touch slots tagged SYSTEM or PATTERN)
+sl_load_from_file("/save/project.txt", SL_SCOPE_PROJECT);
+```
+
+### Multi-scope save/load with `SL_ScopeTarget`
+
+Define a mapping array and use the helper functions to save or load all scopes in one call:
+
+```cpp
+static const SL_ScopeTarget scopes[] = {
+    { SL_SCOPE_SYSTEM,  "/save/system.txt"  },
+    { SL_SCOPE_PROJECT, "/save/project.txt" },
+    { SL_SCOPE_PATTERN, "/save/pattern.txt" },
+};
+constexpr uint8_t NUM_SCOPES = 3;
+
+// Save all three files
+sl_save_all_scopes(SL_ROOT, scopes, NUM_SCOPES);
+
+// Load all three files in canonical order (system → project → pattern)
+// Later loads override earlier ones for settings that appear in multiple scopes.
+sl_load_all_scopes(scopes, NUM_SCOPES);
+```
+
+### Canonical load order
+
+Load scopes in order from most-global to most-specific: **system → project → pattern**. Because later loads overwrite earlier values for settings tagged with multiple scopes (e.g. `SL_SCOPE_PROJECT | SL_SCOPE_PATTERN`), the most-specific file wins — which is usually the desired behaviour.
+
+### Scope gotcha: silent non-apply on mismatch
+
+When loading a file with a scope mask, any line whose key matches a slot whose mask does **not** intersect the requested scope is silently ignored. There is no error or warning. This is intentional — loading a pattern file should not accidentally overwrite system settings — but it also means a typo in a scope mask will cause a setting to not be restored without any obvious indication.
 
 ---
 

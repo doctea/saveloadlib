@@ -28,6 +28,21 @@
 #define SL_MAX_LINE 256
 #endif
 
+// ---------------------------------------------------------------------------
+// Save scope masks — each setting slot carries a bitmask of the scopes it
+// belongs to.  Save and load operations accept a scope mask and only visit
+// slots whose mask intersects the requested mask.
+//
+// Canonical load order: SL_SCOPE_SYSTEM → SL_SCOPE_PROJECT → SL_SCOPE_PATTERN
+// Later loads override earlier ones for settings that appear in multiple scopes.
+// ---------------------------------------------------------------------------
+using sl_scope_t = uint8_t;
+static constexpr sl_scope_t SL_SCOPE_SYSTEM  = 0x01;  // bit 0 — device-wide settings
+static constexpr sl_scope_t SL_SCOPE_PROJECT = 0x02;  // bit 1 — project/song settings
+static constexpr sl_scope_t SL_SCOPE_PATTERN = 0x04;  // bit 2 — per-pattern settings
+// bits 3..7 reserved for future levels
+static constexpr sl_scope_t SL_SCOPE_ALL     = 0xFF;  // default: slot belongs to every scope
+
 extern const char *warning_label;
 extern char linebuf[SL_MAX_LINE];
 
@@ -81,7 +96,8 @@ struct ISaveableSettingHost {
   uint16_t seg_hash = 0;
 
   struct ChildEntry   { ISaveableSettingHost* host; const char* seg; uint16_t hash; };
-  struct SettingEntry { SaveableSettingBase* setting; const char* key; uint16_t hash; };
+  // mask: bitmask of SL_SCOPE_* values — which save/load scopes this slot participates in.
+  struct SettingEntry { SaveableSettingBase* setting; const char* key; uint16_t hash; sl_scope_t mask; };
 
   // Arrays injected by SHStorage<NCH,NSET> — NOT owned by this base; never nullptr after construction
   ChildEntry*   children    = nullptr;
@@ -120,18 +136,25 @@ struct ISaveableSettingHost {
       child_count++;
     }
   }
-  // returns true on success (added or replaced), false on overflow or invalid input
-  bool register_setting(SaveableSettingBase* setting, bool allow_replace = false) {
+  // Register a saveable setting slot.
+  // mask:         scope bitmask (SL_SCOPE_* constants).  Defaults to SL_SCOPE_ALL so
+  //               existing registrations continue to participate in every scope.
+  // allow_replace: if true, attempt to replace an existing slot with the same label first
+  //               (the slot's existing mask is preserved when replacing).
+  // returns true on 
+  bool register_setting(SaveableSettingBase* setting, bool allow_replace = false, sl_scope_t mask = SL_SCOPE_ALL) {
     if (!setting || setting->label[0] == '\0') return false;
 
     if (allow_replace) {
+      // replace_setting_by_label keeps the slot's existing mask unchanged
       if (replace_setting_by_label(setting->label, setting)) return true;
     }
 
     if (setting_count < max_settings) {
       settings[setting_count].setting = setting;
-      settings[setting_count].key = setting->label;
-      settings[setting_count].hash = sl_fnv1a_16(setting->label);
+      settings[setting_count].key     = setting->label;
+      settings[setting_count].hash    = sl_fnv1a_16(setting->label);
+      settings[setting_count].mask    = mask;
       ++setting_count;
       return true;
     }
@@ -157,17 +180,22 @@ struct ISaveableSettingHost {
     return -1;
   }
 
-  bool replace_setting_by_label(const char* label, SaveableSettingBase* newSetting, bool allow_add = false) {
+  // Replace the setting object held in an existing slot, or add a new slot.
+  // When replacing: the slot's mask is intentionally preserved — it belongs to the
+  //   slot, not the setting object, so changing the object doesn't change scope membership.
+  // When adding (allow_add=true): the new slot receives add_mask.
+  bool replace_setting_by_label(const char* label, SaveableSettingBase* newSetting, bool allow_add = false, sl_scope_t add_mask = SL_SCOPE_ALL) {
     if (!label || !newSetting) return false;
     int idx = find_setting_index(label);
     if (idx >= 0) {
       settings[idx].setting = newSetting;
-      settings[idx].key = newSetting->label;
-      settings[idx].hash = sl_fnv1a_16(newSetting->label);
+      settings[idx].key     = newSetting->label;
+      settings[idx].hash    = sl_fnv1a_16(newSetting->label);
+      // mask not changed: belongs to the slot, not the object
       return true;
     }
     if (allow_add) {
-      return register_setting(newSetting, false);
+      return register_setting(newSetting, false, add_mask);
     }
     return false;
   }
@@ -182,10 +210,13 @@ struct ISaveableSettingHost {
   }
 
 
-  // Save recursion
-  virtual void save_recursive(char* prefix, size_t prefix_len, void (*output_cb)(const char*)) {
+  // Save recursion.
+  // Only slots where (slot.mask & scope) != 0 are written; all others are silently skipped.
+  // scope defaults to SL_SCOPE_ALL so the full tree is written when no scope is specified.
+  virtual void save_recursive(char* prefix, size_t prefix_len, void (*output_cb)(const char*), sl_scope_t scope = SL_SCOPE_ALL) {
     static char out[SL_MAX_LINE];  // safe static: written then immediately consumed before recursion
     for (uint8_t i = 0; i < setting_count; ++i) {
+      if (!(settings[i].mask & scope)) continue;  // not in the requested scope
       const char* kv = settings[i].setting->get_line();
       const char* val = strchr(kv, '=') ? strchr(kv, '=') + 1 : kv;
       if (prefix_len == 0) {
@@ -200,17 +231,21 @@ struct ISaveableSettingHost {
       char newpref[SL_MAX_LABEL * 4];  // fits max nesting depth with short segment names
       if (prefix_len == 0) snprintf(newpref, sizeof(newpref), "%s", children[c].seg);
       else snprintf(newpref, sizeof(newpref), "%s~%s", prefix, children[c].seg);
-      children[c].host->save_recursive(newpref, strlen(newpref), output_cb);
+      children[c].host->save_recursive(newpref, strlen(newpref), output_cb, scope);
     }
   }
 
-  // Load line: segments are in-place tokenised pointers
-  virtual bool load_line(char** segments, int seg_count, const char* value) {
+  // Load line: segments are in-place tokenised pointers.
+  // A slot is only applied when (slot.mask & scope) != 0, preventing a scope-specific
+  // file from overwriting settings that don't belong to that scope.
+  // scope defaults to SL_SCOPE_ALL so all slots are matched when no scope is specified.
+  virtual bool load_line(char** segments, int seg_count, const char* value, sl_scope_t scope = SL_SCOPE_ALL) {
     if (seg_count == 1) {
       const char* key = segments[0];
       uint16_t h = sl_fnv1a_16(key);
       for (uint8_t i = 0; i < setting_count; ++i) {
         if (settings[i].hash == h && strcmp(settings[i].key, key) == 0) {
+          if (!(settings[i].mask & scope)) return false;  // scope mismatch: do not apply
           return settings[i].setting->parse_key_value(key, value);
         }
       }
@@ -220,7 +255,7 @@ struct ISaveableSettingHost {
     uint16_t h0 = sl_fnv1a_16(seg0);
     for (uint8_t c = 0; c < child_count; ++c) {
       if (children[c].hash == h0 && strcmp(children[c].seg, seg0) == 0) {
-        return children[c].host->load_line(segments + 1, seg_count - 1, value);
+        return children[c].host->load_line(segments + 1, seg_count - 1, value, scope);
       }
     }
     return false;
@@ -272,12 +307,32 @@ static inline void sl_register_root(ISaveableSettingHost* r) { SL_ROOT = r; }
 
 // Parser helpers
 int sl_tokenise_inplace(char* left, char* segs[], int max_segs);
-bool sl_parse_line_buffer(char* linebuf);
+// Parse one key=value line and route it into the tree.
+// scope: only slots whose mask intersects scope are applied; defaults to SL_SCOPE_ALL.
+bool sl_parse_line_buffer(char* linebuf, sl_scope_t scope = SL_SCOPE_ALL);
 
-// File IO helpers declared below in implementation
-bool sl_load_from_file(const char* path);
-bool sl_load_from_linkedlist(const char* path, const LinkedList<String>& lines);
-bool sl_save_to_file(ISaveableSettingHost* root, const char* path);
+// File IO helpers.
+// scope: limits which settings are visited; defaults to SL_SCOPE_ALL (all settings).
+bool sl_load_from_file(const char* path, sl_scope_t scope = SL_SCOPE_ALL);
+bool sl_load_from_linkedlist(const char* path, const LinkedList<String>& lines, sl_scope_t scope = SL_SCOPE_ALL);
+bool sl_save_to_file(ISaveableSettingHost* root, const char* path, sl_scope_t scope = SL_SCOPE_ALL);
+
+// ---------------------------------------------------------------------------
+// Multi-scope save/load helpers
+// ---------------------------------------------------------------------------
+// Maps one scope bit to a file path.  Build a small array and pass it to
+// sl_save_all_scopes / sl_load_all_scopes.
+struct SL_ScopeTarget {
+  sl_scope_t  scope;   // e.g. SL_SCOPE_SYSTEM
+  const char* path;    // e.g. "/save/system.txt"
+};
+
+// Save each scope to its configured file.
+bool sl_save_all_scopes(ISaveableSettingHost* root, const SL_ScopeTarget* targets, uint8_t count);
+
+// Load each scope from its configured file in the order provided.
+// For predictable overrides, pass targets in canonical order: system, project, pattern.
+bool sl_load_all_scopes(const SL_ScopeTarget* targets, uint8_t count);
 
 // Recursively ensure seg_hash is set and call setup_saveable_settings on each node.
 // This function does not modify child arrays beyond calling the virtual setup method.
