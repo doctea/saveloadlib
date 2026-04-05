@@ -159,17 +159,9 @@ class LSaveableSetting : public SaveableSettingBase {
 public:
   using setter_func_t      = vl::Func<void(DataType)>;
   using getter_func_t      = vl::Func<DataType()>;
-  using is_recall_func_t   = vl::Func<bool()>;
-  using is_save_func_t     = vl::Func<bool()>;
-  using set_recall_func_t  = vl::Func<void(bool)>;
-  using set_save_func_t    = vl::Func<void(bool)>;
 
   setter_func_t     setter;
   getter_func_t     getter;
-  is_recall_func_t  is_recall;
-  is_save_func_t    is_save;
-  set_recall_func_t set_recall;
-  set_save_func_t   set_save;
 
   DataType* variable = nullptr;
   bool recall_enabled = true;
@@ -180,21 +172,13 @@ public:
     const char* category,
     DataType* var,
     setter_func_t     setter_callable    = {},
-    getter_func_t     getter_callable    = {},
-    is_recall_func_t  is_recall_callable = {},
-    is_save_func_t    is_save_callable   = {},
-    set_recall_func_t set_recall_callable = {},
-    set_save_func_t   set_save_callable  = {}
+    getter_func_t     getter_callable    = {}
   ) {
     set_label(lbl);
     set_category(category);
     variable      = var;
     setter        = setter_callable;
     getter        = getter_callable;
-    is_recall     = is_recall_callable;
-    is_save       = is_save_callable;
-    set_recall    = set_recall_callable;
-    set_save      = set_save_callable;
   }
 
   const char* get_line() override {
@@ -220,10 +204,7 @@ public:
 
   bool parse_key_value(const char* key, const char* value) override {
     if (strcmp(key, label) != 0) return false;
-
-    bool can_recall = recall_enabled;
-    if (is_recall) can_recall = is_recall();
-    if (!can_recall) return false;
+    if (!recall_enabled) return false;
 
     DataType parsed = sl_parse_from_cstr<DataType>(value);
 
@@ -233,12 +214,6 @@ public:
     return false;
   }
 
-  void set_recall_enabled_fn(bool s) {
-    if (set_recall) { set_recall(s); return; }
-    recall_enabled = s;
-  }
-  void set_save_enabled_fn(bool s) {
-    if (set_save) { set_save(s); return; }
-    save_enabled = s;
-  }
+  void set_recall_enabled_fn(bool s) { recall_enabled = s; }
+  void set_save_enabled_fn(bool s)   { save_enabled = s; }
 };

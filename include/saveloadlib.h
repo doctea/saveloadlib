@@ -77,14 +77,16 @@ struct ISaveableSettingHost {
   char path_segment_buf[PATH_SEG_MAX] = {};
   uint16_t seg_hash = 0;
 
-  struct ChildEntry { ISaveableSettingHost* host; const char* seg; uint16_t hash; };
-  struct SettingEntry  { SaveableSettingBase* setting; const char* key; uint16_t hash; };
+  struct ChildEntry   { ISaveableSettingHost* host; const char* seg; uint16_t hash; };
+  struct SettingEntry { SaveableSettingBase* setting; const char* key; uint16_t hash; };
 
-  ChildEntry children[SL_MAX_CHILDREN];
-  uint8_t child_count = 0;
-
-  SettingEntry settings[SL_MAX_SETTINGS];
-  uint8_t setting_count = 0;
+  // Arrays injected by SHStorage<NCH,NSET> — NOT owned by this base; never nullptr after construction
+  ChildEntry*   children    = nullptr;
+  SettingEntry* settings    = nullptr;
+  uint8_t max_children      = 0;
+  uint8_t max_settings      = 0;
+  uint8_t child_count       = 0;
+  uint8_t setting_count     = 0;
 
   virtual void set_path_segment(const char* seg) {
     if (!seg) { 
@@ -108,7 +110,7 @@ struct ISaveableSettingHost {
   }
 
   void register_child(ISaveableSettingHost* child) {
-    if (child_count < SL_MAX_CHILDREN && child && child->path_segment) {
+    if (child_count < max_children && child && child->path_segment) {
       children[child_count].host = child;
       children[child_count].seg = child->path_segment;
       children[child_count].hash = sl_fnv1a_16(child->path_segment);
@@ -123,7 +125,7 @@ struct ISaveableSettingHost {
       if (replace_setting_by_label(setting->label, setting)) return true;
     }
 
-    if (setting_count < SL_MAX_SETTINGS) {
+    if (setting_count < max_settings) {
       settings[setting_count].setting = setting;
       settings[setting_count].key = setting->label;
       settings[setting_count].hash = sl_fnv1a_16(setting->label);
@@ -132,10 +134,12 @@ struct ISaveableSettingHost {
     }
 
     // no space
+    Serial.printf("Warning: failed to register setting '%s' for host '%s' - max settings reached\n", setting->label, this->path_segment);
     return false;
   }
 
   // in ISaveableSettingHost
+  bool saveable_settings_setup = false;
   virtual void setup_saveable_settings() {
     // default: do nothing
   }
@@ -222,7 +226,31 @@ struct ISaveableSettingHost {
   virtual ~ISaveableSettingHost() {}
 };
 
-// Root pointer - single definition in saveloadlib.cpp, extern here so all TUs share the same instance
+// ---------------------------------------------------------------------------
+// SHStorage<NCH, NSET> — inherit from this instead of ISaveableSettingHost.
+// Provides inline storage for NCH children and NSET settings; injects pointers
+// into ISaveableSettingHost so all virtual methods work without change.
+// NCH=0 is legal (leaf nodes with no children).
+// ---------------------------------------------------------------------------
+template<uint8_t NCH, uint8_t NSET>
+struct SHStorage : public ISaveableSettingHost {
+  // GCC zero-size arrays (arm-none-eabi extension) are used when NCH=0;
+  // children pointer is set to nullptr in that case.
+  ChildEntry   _ch[NCH];   // zero-size when NCH=0; GCC extension, fine on RP2040
+  SettingEntry _st[NSET];
+  SHStorage() {
+    children     = NCH > 0 ? _ch : nullptr;
+    max_children = NCH;
+    settings     = _st;
+    max_settings = NSET;
+  }
+};
+
+// Convenience aliases for common patterns
+using SHLeaf    = SHStorage<0,  SL_MAX_SETTINGS>;  // no children, default settings
+using SHNode    = SHStorage<SL_MAX_CHILDREN, SL_MAX_SETTINGS>; // full size (backwards compat)
+
+
 extern ISaveableSettingHost* SL_ROOT;
 static inline void sl_register_root(ISaveableSettingHost* r) { SL_ROOT = r; }
 
@@ -265,5 +293,9 @@ void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_
 // Walk the tree and call a callback for each printed line
 void sl_print_tree_with_callback(ISaveableSettingHost* root, SL_PrintCallback cb, void* user_ctx = nullptr, uint8_t max_depth = 8);
 
-
 void debug_print_file(const char *filename);
+
+
+// #include "functional-vlpp.h"
+// using SL_PrintLambda = vl::Func<void(const char* line, void* user_ctx)>;
+// void sl_print_tree_with_lambda(ISaveableSettingHost* root, SL_PrintLambda lambda, void* user_ctx = nullptr, uint8_t max_depth = 8);

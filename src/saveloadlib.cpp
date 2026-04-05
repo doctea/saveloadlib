@@ -104,8 +104,10 @@ bool sl_save_to_file(ISaveableSettingHost* root, const char* path) {
 }
 
 void sl_setup_all(ISaveableSettingHost* root) {
-  //Serial.printf("sl_setup_all() for root %p aka %s\n", root, root ? root->path_segment : "null"); Serial.flush();
   if (!root) return;
+  if (root->saveable_settings_setup) return;   // guard: don't call twice
+  root->saveable_settings_setup = true;
+
   // Ensure hashes are computed so replace/find operations are fast during setup.
   sl_compute_hashes_recursive(root);
 
