@@ -30,23 +30,75 @@ template<> struct sl_is_floating_point<double>              { static constexpr b
 template<> struct sl_is_floating_point<long double>         { static constexpr bool value = true; };
 // ---------------------------------------------------------------------------
 
-// Generic parser helper
+#if __cplusplus >= 201703L
+// ---------------------------------------------------------------------------
+// C++17 path: use if constexpr for compact, readable dispatch
+// ---------------------------------------------------------------------------
+
 template<typename T>
 static inline T sl_parse_from_cstr(const char* s) {
-  if constexpr (sl_is_same<T, bool>::value) {
-    return (atoi(s) != 0);
-  } else if constexpr (sl_is_integral<T>::value) {
-    return (T)atoll(s);
-  } else if constexpr (sl_is_floating_point<T>::value) {
-    return (T)atof(s);
-  } else if constexpr (__is_enum(T)) {
-    return (T)(int)atoll(s);
-  } else if constexpr (sl_is_same<T, const char*>::value) {
-    return s;
-  } else {
-    static_assert(!sl_is_same<T, T>::value, "No generic parser for this type; specialise or implement custom setting");
-  }
+    if constexpr (sl_is_same<T, bool>::value)        { return (atoi(s) != 0); }
+    else if constexpr (sl_is_integral<T>::value)     { return (T)atoll(s); }
+    else if constexpr (sl_is_floating_point<T>::value){ return (T)atof(s); }
+    else if constexpr (__is_enum(T))                 { return (T)(int)atoll(s); }
+    else if constexpr (sl_is_same<T, const char*>::value) { return s; }
+    else { static_assert(!sl_is_same<T,T>::value, "No parser for this type"); }
 }
+
+template<typename T>
+static inline void sl_format_to_buf(char* buf, size_t sz, const char* lbl, T v) {
+    if constexpr (sl_is_same<T, bool>::value)             { snprintf(buf, sz, "%s=%d",   lbl, v ? 1 : 0); }
+    else if constexpr (sl_is_integral<T>::value)          { snprintf(buf, sz, "%s=%lld", lbl, (long long)v); }
+    else if constexpr (sl_is_floating_point<T>::value)    { snprintf(buf, sz, "%s=%.6g", lbl, (double)v); }
+    else if constexpr (__is_enum(T))                      { snprintf(buf, sz, "%s=%lld", lbl, (long long)v); }
+    else if constexpr (sl_is_same<T, const char*>::value) { snprintf(buf, sz, "%s=%s",   lbl, v ? v : ""); }
+    else                                                  { snprintf(buf, sz, "%s=0",    lbl); }
+}
+
+#else
+// ---------------------------------------------------------------------------
+// C++14 path: tag-dispatch structs (no if constexpr required)
+// ---------------------------------------------------------------------------
+
+// Tag: 0=bool, 1=integral(non-bool), 2=float, 3=enum/other, 4=const char*
+template<typename T>
+struct sl_type_tag {
+    static const int value =
+        sl_is_same<T, bool>::value        ? 0 :
+        sl_is_integral<T>::value          ? 1 :
+        sl_is_floating_point<T>::value    ? 2 :
+        sl_is_same<T, const char*>::value ? 4 :
+        3; // enum or unrecognised
+};
+
+template<typename T, int Tag = sl_type_tag<T>::value> struct sl_parser;
+template<typename T> struct sl_parser<T, 0> { static T run(const char* s) { return (T)(atoi(s) != 0); } };
+template<typename T> struct sl_parser<T, 1> { static T run(const char* s) { return (T)atoll(s); } };
+template<typename T> struct sl_parser<T, 2> { static T run(const char* s) { return (T)atof(s); } };
+template<typename T> struct sl_parser<T, 3> { static T run(const char* s) { return (T)(int)atoll(s); } };
+template<typename T> struct sl_parser<T, 4> { static T run(const char* s) { return s; } };
+
+template<typename T, int Tag = sl_type_tag<T>::value> struct sl_formatter;
+template<typename T> struct sl_formatter<T, 0> {
+    static void run(char* buf, size_t sz, const char* lbl, T v) { snprintf(buf, sz, "%s=%d",   lbl, v ? 1 : 0); } };
+template<typename T> struct sl_formatter<T, 1> {
+    static void run(char* buf, size_t sz, const char* lbl, T v) { snprintf(buf, sz, "%s=%lld", lbl, (long long)v); } };
+template<typename T> struct sl_formatter<T, 2> {
+    static void run(char* buf, size_t sz, const char* lbl, T v) { snprintf(buf, sz, "%s=%.6g", lbl, (double)v); } };
+template<typename T> struct sl_formatter<T, 3> {
+    static void run(char* buf, size_t sz, const char* lbl, T v) { snprintf(buf, sz, "%s=%lld", lbl, (long long)v); } };
+template<typename T> struct sl_formatter<T, 4> {
+    static void run(char* buf, size_t sz, const char* lbl, T v) { snprintf(buf, sz, "%s=%s",   lbl, v ? v : ""); } };
+
+template<typename T>
+static inline T sl_parse_from_cstr(const char* s) { return sl_parser<T>::run(s); }
+
+template<typename T>
+static inline void sl_format_to_buf(char* buf, size_t sz, const char* lbl, T v) {
+    sl_formatter<T>::run(buf, sz, lbl, v);
+}
+
+#endif // __cplusplus >= 201703L
 
 
 // callable validity helper (works for vl::Func and raw pointers)
@@ -107,20 +159,7 @@ public:
     DataType v{};
     if (getter_func && target) v = (target->*getter_func)();
     else if (variable) v = *variable;
-
-    if constexpr (sl_is_same<DataType, bool>::value) {
-      snprintf(linebuf, sizeof(linebuf), "%s=%d", label, v ? 1 : 0);
-    } else if constexpr (sl_is_integral<DataType>::value) {
-      snprintf(linebuf, sizeof(linebuf), "%s=%lld", label, (long long)v);
-    } else if constexpr (sl_is_floating_point<DataType>::value) {
-      snprintf(linebuf, sizeof(linebuf), "%s=%.6g", label, (double)v);
-    } else if constexpr (__is_enum(DataType)) {
-      snprintf(linebuf, sizeof(linebuf), "%s=%lld", label, (long long)v);
-    } else if constexpr (sl_is_same<DataType, const char*>::value) {
-      snprintf(linebuf, sizeof(linebuf), "%s=%s", label, v ? v : "");
-    } else {
-      snprintf(linebuf, sizeof(linebuf), "%s=0", label);
-    }
+    sl_format_to_buf(linebuf, sizeof(linebuf), label, v);
     return linebuf;
   }
 
@@ -187,20 +226,7 @@ public:
     DataType v{};
     if (sl_callable_valid(getter))  v = getter();
     else if (variable) v = *variable;
-
-    if constexpr (sl_is_same<DataType, bool>::value) {
-      snprintf(linebuf, sizeof(linebuf), "%s=%d", label, v ? 1 : 0);
-    } else if constexpr (sl_is_integral<DataType>::value) {
-      snprintf(linebuf, sizeof(linebuf), "%s=%lld", label, (long long)v);
-    } else if constexpr (sl_is_floating_point<DataType>::value) {
-      snprintf(linebuf, sizeof(linebuf), "%s=%.6g", label, (double)v);
-    } else if constexpr (__is_enum(DataType)) {
-      snprintf(linebuf, sizeof(linebuf), "%s=%lld", label, (long long)v);
-    } else if constexpr (sl_is_same<DataType, const char*>::value) {
-      snprintf(linebuf, sizeof(linebuf), "%s=%s", label, v ? v : "");
-    } else {
-      snprintf(linebuf, sizeof(linebuf), "%s=0", label);
-    }
+    sl_format_to_buf(linebuf, sizeof(linebuf), label, v);
     return linebuf;
   }
 

@@ -275,10 +275,6 @@ void sl_print_tree_with_lambda(ISaveableSettingHost* root, SL_PrintLambda lambda
   sl_print_recursive(root, "", bridge_cb, &lambda, 0, max_depth);
 }
 
-
-
-#include "SimplyAtomic.h"
-
 void debug_print_file(const char *filename) {
   // for some reason we still get that fucking problem where the system freezes when we try to 
   // output lots of serial :/ especially when the app is running, rather than during setup()..

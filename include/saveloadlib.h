@@ -235,6 +235,30 @@ struct ISaveableSettingHost {
     }
   }
 
+  // Context-based variant: allows capturing state in plain C callbacks (e.g. to push
+  // lines into a LinkedList).  Mirrors the logic of the callback-only overload exactly.
+  virtual void save_recursive(char* prefix, size_t prefix_len, void (*output_cb)(const char*, void*), void* ctx, sl_scope_t scope = SL_SCOPE_ALL) {
+    static char out[SL_MAX_LINE];
+    for (uint8_t i = 0; i < setting_count; ++i) {
+      if (!(settings[i].mask & scope)) continue;
+      const char* kv = settings[i].setting->get_line();
+      const char* val = strchr(kv, '=') ? strchr(kv, '=') + 1 : kv;
+      if (prefix_len == 0) {
+        snprintf(out, SL_MAX_LINE, "%s=%s", settings[i].key, val);
+      } else {
+        snprintf(out, SL_MAX_LINE, "%s~%s=%s", prefix, settings[i].key, val);
+      }
+      output_cb(out, ctx);
+    }
+    for (uint8_t c = 0; c < child_count; ++c) {
+      if (!children[c].host || !children[c].seg) continue;
+      char newpref[SL_MAX_LABEL * 4];
+      if (prefix_len == 0) snprintf(newpref, sizeof(newpref), "%s", children[c].seg);
+      else snprintf(newpref, sizeof(newpref), "%s~%s", prefix, children[c].seg);
+      children[c].host->save_recursive(newpref, strlen(newpref), output_cb, ctx, scope);
+    }
+  }
+
   // Load line: segments are in-place tokenised pointers.
   // A slot is only applied when (slot.mask & scope) != 0, preventing a scope-specific
   // file from overwriting settings that don't belong to that scope.
@@ -304,6 +328,17 @@ using SHNode    = SHStorage<SL_MAX_CHILDREN, SL_MAX_SETTINGS>; // full size (bac
 
 extern ISaveableSettingHost* SL_ROOT;
 static inline void sl_register_root(ISaveableSettingHost* r) { SL_ROOT = r; }
+
+// Save the tree into a LinkedList<String>.  Each entry is one "path~key=value" line.
+// Requires LinkedList.h to be already included (it is, via the saveloadlib.h header).
+static inline void sl_save_to_linkedlist(ISaveableSettingHost* root, LinkedList<String>& out, sl_scope_t scope = SL_SCOPE_ALL) {
+  if (!root) return;
+  char prefix[2] = {0};
+  root->save_recursive(prefix, 0,
+    [](const char* line, void* ctx) {
+      reinterpret_cast<LinkedList<String>*>(ctx)->add(String(line));
+    }, &out, scope);
+}
 
 // Parser helpers
 int sl_tokenise_inplace(char* left, char* segs[], int max_segs);
