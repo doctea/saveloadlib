@@ -11,6 +11,8 @@
   #include <LittleFS.h>
 #endif
 
+#include "LinkedList.h"
+
 // #include <cstdint>
 // #include <cstddef>
 // #include <cstring>
@@ -260,6 +262,7 @@ bool sl_parse_line_buffer(char* linebuf);
 
 // File IO helpers declared below in implementation
 bool sl_load_from_file(const char* path);
+bool sl_load_from_linkedlist(const char* path, const LinkedList<String>& lines);
 bool sl_save_to_file(ISaveableSettingHost* root, const char* path);
 
 // Recursively ensure seg_hash is set and call setup_saveable_settings on each node.
@@ -295,6 +298,10 @@ void sl_print_tree_with_callback(ISaveableSettingHost* root, SL_PrintCallback cb
 
 void debug_print_file(const char *filename);
 
+
+#include "functional-vlpp.h"
+using SL_PrintLambda = vl::Func<void(const char*)>;
+void sl_print_tree_with_lambda(ISaveableSettingHost* root, SL_PrintLambda lambda, uint8_t max_depth = 8);
 
 // #include "functional-vlpp.h"
 // using SL_PrintLambda = vl::Func<void(const char* line, void* user_ctx)>;

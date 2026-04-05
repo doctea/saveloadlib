@@ -75,6 +75,17 @@ bool sl_load_from_file(const char* path) {
   return true;
 }
 
+// LinkedList<String> loader (for testing with in-memory data, or from other sources like Serial)
+bool sl_load_from_linkedlist(const char* path, const LinkedList<String>& lines) {
+  char linebuf[SL_MAX_LINE];
+  for (int i = 0; i < lines.size(); i++) {
+    String line = lines.get(i);
+    line.toCharArray(linebuf, sizeof(linebuf));
+    sl_parse_line_buffer(linebuf);
+  }
+  return true;
+}
+
 // File writer helper
 struct FileWriter {
   File f;
@@ -200,6 +211,16 @@ void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_
 void sl_print_tree_with_callback(ISaveableSettingHost* root, SL_PrintCallback cb, void* user_ctx, uint8_t max_depth) {
   if (!root || !cb) return;
   sl_print_recursive(root, "", cb, user_ctx, 0, max_depth);
+}
+
+// Public: print with vl::Func lambda (no user_ctx needed - lambda captures its own state)
+void sl_print_tree_with_lambda(ISaveableSettingHost* root, SL_PrintLambda lambda, uint8_t max_depth) {
+  if (!root) return;
+  // bridge: store lambda pointer in ctx, invoke via plain callback
+  auto bridge_cb = [](const char* line, void* ctx) {
+    (*reinterpret_cast<SL_PrintLambda*>(ctx))(line);
+  };
+  sl_print_recursive(root, "", bridge_cb, &lambda, 0, max_depth);
 }
 
 
