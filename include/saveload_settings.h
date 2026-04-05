@@ -143,6 +143,8 @@ public:
     return false;
   }
 
+  virtual size_t heap_size() const override { return sizeof(SaveableSetting<TargetClass, DataType>); }
+
   void set_recall_enabled(bool s) {
     if (set_recall_enabled_func && target) (target->*set_recall_enabled_func)(s);
     else recall_enabled = s;
@@ -213,6 +215,8 @@ public:
 
     return false;
   }
+
+  virtual size_t heap_size() const override { return sizeof(LSaveableSetting<DataType>); }
 
   void set_recall_enabled_fn(bool s) { recall_enabled = s; }
   void set_save_enabled_fn(bool s)   { save_enabled = s; }

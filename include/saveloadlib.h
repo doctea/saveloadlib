@@ -70,6 +70,7 @@ struct SaveableSettingBase {
 
   virtual const char* get_line() = 0; // returns "key=value" or "value"
   virtual bool parse_key_value(const char* key, const char* value) = 0;
+  virtual size_t heap_size() const { return sizeof(SaveableSettingBase); }
   virtual ~SaveableSettingBase() {}
 };
 
@@ -299,6 +300,22 @@ static inline void sl_register_and_setup_root(ISaveableSettingHost* r) {
   sl_setup_all(r);
 }
 
+
+// ---------------------------------------------------------------------------
+// Tree statistics
+// ---------------------------------------------------------------------------
+struct SL_TreeCounts {
+  uint16_t nodes;     // total ISaveableSettingHost objects in tree
+  uint16_t settings;  // total registered settings across all nodes
+  uint32_t bytes;     // estimated memory: node structs + inline arrays + heap-allocated settings
+};
+
+extern SL_TreeCounts sl_cached_tree_counts;  // last computed result
+extern bool          sl_tree_counts_valid;   // false after any sl_setup_all call
+
+// Walk the tree and count nodes + settings.
+// Result is cached; pass force=true to force a re-walk.
+SL_TreeCounts sl_count_tree(ISaveableSettingHost* root, bool force = false);
 
 // Print callback signature for each setting line
 using SL_PrintCallback = void(*)(const char* line, void* user_ctx);

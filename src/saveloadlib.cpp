@@ -7,6 +7,38 @@ ISaveableSettingHost* SL_ROOT = nullptr;  // single definition; extern-declared 
 
 char linebuf[SL_MAX_LINE];  // shared buffer for constructing lines to save
 
+SL_TreeCounts sl_cached_tree_counts = {0, 0, 0};
+bool          sl_tree_counts_valid  = false;
+
+static SL_TreeCounts sl_count_tree_recursive(ISaveableSettingHost* root) {
+  SL_TreeCounts c = {0, 0, 0};
+  if (!root) return c;
+  c.nodes    = 1;
+  c.settings = root->setting_count;
+  // node struct itself + inline child/setting arrays inside SHStorage
+  c.bytes    = (uint32_t)sizeof(ISaveableSettingHost)
+             + (uint32_t)root->max_children * sizeof(ISaveableSettingHost::ChildEntry)
+             + (uint32_t)root->max_settings  * sizeof(ISaveableSettingHost::SettingEntry);
+  // heap-allocated setting objects
+  for (uint8_t i = 0; i < root->setting_count; ++i)
+    c.bytes += (uint32_t)root->settings[i].setting->heap_size();
+  for (uint8_t i = 0; i < root->child_count; ++i) {
+    SL_TreeCounts child = sl_count_tree_recursive(root->children[i].host);
+    c.nodes    += child.nodes;
+    c.settings += child.settings;
+    c.bytes    += child.bytes;
+  }
+  return c;
+}
+
+SL_TreeCounts sl_count_tree(ISaveableSettingHost* root, bool force) {
+  if (!force && sl_tree_counts_valid)
+    return sl_cached_tree_counts;
+  sl_cached_tree_counts = sl_count_tree_recursive(root);
+  sl_tree_counts_valid  = true;
+  return sl_cached_tree_counts;
+}
+
 int sl_tokenise_inplace(char* left, char* segs[], int max_segs) {
   int count = 0;
   char* p = left;
@@ -116,6 +148,7 @@ bool sl_save_to_file(ISaveableSettingHost* root, const char* path) {
 
 void sl_setup_all(ISaveableSettingHost* root) {
   if (!root) return;
+  sl_tree_counts_valid = false;  // tree is changing; invalidate cache
   if (root->saveable_settings_setup) return;   // guard: don't call twice
   root->saveable_settings_setup = true;
 
@@ -257,7 +290,7 @@ void debug_print_file(const char *filename) {
       Serial.printf("debug_print_file: Finished showing contents of %s\n", filename);
       //Serial.flush();
     } else {
-      Serial.printf("debug_print_file: File '%s' does not exist", filename);
+      Serial.printf("debug_print_file: File '%s' does not exist\n", filename);
       //Serial.flush();
     }
   // }
