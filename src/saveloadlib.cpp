@@ -141,6 +141,7 @@ bool sl_save_to_file(ISaveableSettingHost* root, const char* path, sl_scope_t sc
   if (!root) return false;
   if (!globalFileWriter.begin(path)) return false;
   char prefix[1] = {0};
+  //Serial.printf("Saving to '%s' with scope mask 0x%02X... starting at %s\n", path, scope, root->path_segment);
   root->save_recursive(prefix, 0, sl_file_output_cb, scope);
   globalFileWriter.end();
   return true;
@@ -169,17 +170,28 @@ void sl_setup_all(ISaveableSettingHost* root) {
   if (!root) return;
   sl_tree_counts_valid = false;  // tree is changing; invalidate cache
   if (root->saveable_settings_setup) return;   // guard: don't call twice
-  root->saveable_settings_setup = true;
-
+  
+  root->setup_saveable_settings();
+  
   // Ensure hashes are computed so replace/find operations are fast during setup.
   sl_compute_hashes_recursive(root);
-
+  
   // Use a simple stackless recursion; depth is expected to be small.
-  root->setup_saveable_settings();
   for (uint8_t i = 0; i < root->child_count; ++i) {
     ISaveableSettingHost* child = root->children[i].host;
-    if (child) sl_setup_all(child);
+    if (child) {
+      // Refresh seg/hash via virtual dispatch before recursing.
+      // get_path_segment() may return a virtual value (e.g. get_label()) that wasn't
+      // available at register_child() time; objects are fully constructed here so
+      // virtual dispatch is safe.
+      const char* seg = child->get_path_segment();
+      root->children[i].seg  = seg;
+      root->children[i].hash = sl_fnv1a_16(seg);
+      sl_setup_all(child);
+    }
   }
+
+  root->saveable_settings_setup = true;
 }
 
 
@@ -203,7 +215,14 @@ static void sl_build_prefix(char* dest, size_t dest_size, const char* prefix, co
 
 // Internal recursive walker that emits lines via callback
 static void sl_print_recursive(ISaveableSettingHost* host, const char* prefix, SL_PrintCallback cb, void* ctx, uint8_t depth, uint8_t max_depth) {
-  if (!host || depth > max_depth) return;
+  if (!host || depth > max_depth) {
+    if (depth > max_depth && cb) {
+      char linebuf[SL_MAX_LINE];
+      snprintf(linebuf, sizeof(linebuf), "%s... (max depth %i reached in %s)", prefix, max_depth, host->path_segment ? host->path_segment : "unknown");
+      cb(linebuf, ctx);
+    }
+    return;
+  }
 
   // Print host header line
   char linebuf[SL_MAX_LINE];

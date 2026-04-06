@@ -247,3 +247,56 @@ public:
   void set_recall_enabled_fn(bool s) { recall_enabled = s; }
   void set_save_enabled_fn(bool s)   { save_enabled = s; }
 };
+
+// -------------------- SaveableNibbleArraySetting (fixed-size packed nibble array) --------------------
+// Stores an array of small integer values as a compact nibble-encoded hex string.
+// Each element is encoded as a single hex character (nibble, values 0..15).
+//
+// 'offset' is added to the raw value before encoding and subtracted after decoding.
+// This allows signed types or values with a sentinel (-1 etc.) to be stored:
+//   e.g. int8_t values -1..14 with offset=1 → stored 0..15 ✓
+//
+// Line format:  key=0af3...   (one hex char per element, no separators)
+// Max elements: floor((SL_MAX_LINE - SL_MAX_LABEL - 2) / 1)  ≈ 200 for SL_MAX_LINE=256
+//
+// Usage example:
+//   register_setting(new SaveableNibbleArraySetting<int8_t>(
+//       "map", "Gates", map_note_to_gate, MIDI_NUM_NOTES, /*offset=*/1
+//   ), false, SL_SCOPE_PROJECT);
+template<typename T>
+class SaveableNibbleArraySetting : public SaveableSettingBase {
+public:
+    T*       data;
+    uint16_t count;
+    int8_t   offset;  // added before encode; subtracted after decode
+
+    SaveableNibbleArraySetting(const char* lbl, const char* cat,
+                               T* data_ptr, uint16_t n, int8_t offset_val = 0)
+        : data(data_ptr), count(n), offset(offset_val) {
+        set_label(lbl);
+        set_category(cat ? cat : "");
+    }
+
+    const char* get_line() override {
+        int pos = snprintf(linebuf, SL_MAX_LINE, "%s=", label);
+        for (uint16_t i = 0; i < count && pos < SL_MAX_LINE - 1; i++) {
+            int v = (int)data[i] + offset;
+            if (v < 0) v = 0;
+            if (v > 15) v = 15;
+            linebuf[pos++] = "0123456789abcdef"[v & 0xF];
+        }
+        linebuf[pos] = '\0';
+        return linebuf;
+    }
+
+    bool parse_key_value(const char* key, const char* value) override {
+        if (strcmp(key, label) != 0) return false;
+        for (uint16_t i = 0; i < count && value[i]; i++) {
+            char nibble[2] = { value[i], '\0' };
+            data[i] = (T)((int)strtol(nibble, nullptr, 16) - offset);
+        }
+        return true;
+    }
+
+    virtual size_t heap_size() const override { return sizeof(SaveableNibbleArraySetting<T>); }
+};
