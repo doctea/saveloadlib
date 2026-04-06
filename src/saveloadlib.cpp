@@ -296,10 +296,7 @@ static void sl_print_recursive(ISaveableSettingHost* host, const char* prefix, S
 
   // Emit settings for this host
   for (uint8_t i = 0; i < host->setting_count; ++i) {
-    if (!(host->settings[i].mask & scope)) {
-      if (cb) cb("Skipping setting '%s' for host '%s' due to scope mismatch (slot mask 0x%02X, print scope 0x%02X)\n", host->settings[i].setting->label, host->path_segment, host->settings[i].mask, scope);
-      continue;  // not in the requested scope
-    }
+    if (!(host->settings[i].mask & scope)) continue;  // not in the requested scope
     SaveableSettingBase* s = host->settings[i].setting;
     if (!s) continue;
     // build full path: prefix~hostseg~key  or hostseg~key if no prefix
