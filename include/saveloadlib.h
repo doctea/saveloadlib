@@ -72,6 +72,8 @@ static inline uint16_t sl_fnv1a_16(const char* s) {
 #define SL_MAX_LABEL 48
 #endif
 
+#include "sl_arena.h"  // provides SL_ArenaBase, sl_setting_arena, sl_set_setting_arena
+
 struct SaveableSettingBase {
   char label[SL_MAX_LABEL] = {};       // owned copy - safe against temporaries at construction
   const char* category_name = "";     // always a string literal, pointer is fine
@@ -88,6 +90,25 @@ struct SaveableSettingBase {
   virtual bool parse_key_value(const char* key, const char* value) = 0;
   virtual size_t heap_size() const { return sizeof(SaveableSettingBase); }
   virtual ~SaveableSettingBase() {}
+
+  // When a global arena is registered via sl_set_setting_arena(), all
+  // `new LSaveableSetting<>()` / `new SaveableSetting<>()` etc. calls
+  // automatically use bump allocation from that arena — no source changes
+  // needed in setup_saveable_settings().  Falls back to ::operator new if
+  // no arena is set (so the library works as-is on any platform).
+  static void* operator new(size_t sz) {
+    if (sl_setting_arena) {
+      void* p = sl_setting_arena->allocate(sz, 8u); // 8-byte align: safe for any member type
+      if (p) return p;
+      if (Serial) Serial.printf("SL_Arena: full, falling back to heap for %u bytes\n", (unsigned)sz);
+    }
+    return ::operator new(sz);
+  }
+  // Arena-owned pointers are freed at arena reset(); heap allocations go to ::delete.
+  static void operator delete(void* p) noexcept {
+    if (sl_setting_arena && sl_setting_arena->owns(p)) return;
+    ::operator delete(p);
+  }
 };
 
 struct ISaveableSettingHost {
@@ -442,6 +463,7 @@ void debug_print_file(const char *filename);
 
 #include "functional-vlpp.h"
 using SL_PrintLambda = vl::Func<void(const char*)>;
+
 void sl_print_tree_with_lambda(ISaveableSettingHost* root, SL_PrintLambda lambda, uint8_t max_depth = 8, sl_scope_t scope = SL_SCOPE_ALL);
 
 // #include "functional-vlpp.h"

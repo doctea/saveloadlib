@@ -5,6 +5,8 @@ const char *warning_label = " - WARNING: no target nor getter func!";
 
 ISaveableSettingHost* SL_ROOT = nullptr;  // single definition; extern-declared in saveloadlib.h
 
+SL_ArenaBase* sl_setting_arena = nullptr;  // global arena for SaveableSettingBase::operator new
+
 char linebuf[SL_MAX_LINE];  // shared buffer for constructing lines to save
 
 SL_TreeCounts sl_cached_tree_counts = {0, 0, 0};
