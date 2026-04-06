@@ -69,19 +69,40 @@ static inline uint16_t sl_fnv1a_16(const char* s) {
 }
 
 #ifndef SL_MAX_LABEL
-#define SL_MAX_LABEL 48
+#define SL_MAX_LABEL 48   // max bytes (incl. NUL) copied by set_label(); also a safety cap
 #endif
 
 #include "sl_arena.h"  // provides SL_ArenaBase, sl_setting_arena, sl_set_setting_arena
 
 struct SaveableSettingBase {
-  char label[SL_MAX_LABEL] = {};       // owned copy - safe against temporaries at construction
-  const char* category_name = "";     // always a string literal, pointer is fine
+  // 4-byte pointer instead of a 48-byte inline buffer.
+  // Points to arena memory, heap memory, or a string literal — see set_label() / set_label_static().
+  const char* label = "";
+  const char* category_name = "";  // always a string literal pointer
 
+  // Copy lbl into the arena (if active) or the heap.
+  // Safe for temporaries, stack buffers, and dynamically-built strings.
+  // Uses at most SL_MAX_LABEL-1 chars + NUL.
   void set_label(const char* lbl) {
-    if (lbl) strncpy(label, lbl, SL_MAX_LABEL - 1);
-    label[SL_MAX_LABEL - 1] = '\0';
+    if (!lbl || !*lbl) { label = ""; return; }
+    size_t n = strlen(lbl);
+    if (n >= SL_MAX_LABEL) n = SL_MAX_LABEL - 1;
+    // Allocate n+1 bytes: from arena if available (fast, no heap scan), else heap.
+    // Settings are permanent so the allocation is intentionally never freed.
+    char* buf = sl_setting_arena
+              ? (char*)sl_setting_arena->allocate(n + 1, 1u)
+              : (char*)::operator new(n + 1);
+    if (buf) { memcpy(buf, lbl, n); buf[n] = '\0'; label = buf; }
+    else       label = lbl;  // fallback: borrow pointer (unsafe, but better than crashing)
   }
+
+  // Store pointer directly — NO copy, zero allocation.
+  // ONLY safe when lbl is a string literal or otherwise permanently allocated
+  // (e.g. a member array, a global, or a pointer whose lifetime exceeds the setting).
+  void set_label_static(const char* lbl) {
+    label = lbl ? lbl : "";
+  }
+
   void set_category(const char* cat) {
     category_name = cat ? cat : "";
   }
@@ -177,7 +198,7 @@ struct ISaveableSettingHost {
   //               (the slot's existing mask is preserved when replacing).
   // returns true on 
   bool register_setting(SaveableSettingBase* setting, bool allow_replace = false, sl_scope_t mask = SL_SCOPE_ALL) {
-    if (!setting || setting->label[0] == '\0') return false;
+    if (!setting || !setting->label || !setting->label[0]) return false;
 
     if (allow_replace) {
       // replace_setting_by_label keeps the slot's existing mask unchanged

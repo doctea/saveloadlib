@@ -198,11 +198,11 @@ public:
 template<typename DataType>
 class LSaveableSetting : public SaveableSettingBase {
 public:
-  using setter_func_t      = vl::Func<void(DataType)>;
-  using getter_func_t      = vl::Func<DataType()>;
+  using setter_func_t = vl::Func<void(DataType)>;
+  using getter_func_t = vl::Func<DataType()>;
 
-  setter_func_t     setter;
-  getter_func_t     getter;
+  setter_func_t setter;
+  getter_func_t getter;
 
   DataType* variable = nullptr;
   bool recall_enabled = true;
@@ -212,14 +212,14 @@ public:
     const char* lbl,
     const char* category,
     DataType* var,
-    setter_func_t     setter_callable    = {},
-    getter_func_t     getter_callable    = {}
+    setter_func_t setter_callable = {},
+    getter_func_t getter_callable = {}
   ) {
     set_label(lbl);
     set_category(category);
-    variable      = var;
-    setter        = setter_callable;
-    getter        = getter_callable;
+    variable = var;
+    setter   = setter_callable;
+    getter   = getter_callable;
   }
 
   const char* get_line() override {

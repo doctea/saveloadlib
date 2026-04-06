@@ -174,10 +174,15 @@ void sl_setup_all(ISaveableSettingHost* root) {
   if (root->saveable_settings_setup) return;   // guard: don't call twice
   
   root->setup_saveable_settings();
-  
-  // Ensure hashes are computed so replace/find operations are fast during setup.
-  sl_compute_hashes_recursive(root);
-  
+
+  // NOTE: sl_compute_hashes_recursive is NOT called here.
+  //   - Setting hashes are computed inside register_setting() already.
+  //   - Child seg+hash are refreshed in the loop below via get_path_segment()
+  //     before each recursive sl_setup_all call, which is the right moment
+  //     (after virtual dispatch is safe and segment is final).
+  //   - Calling it here would redundantly walk the whole subtree O(n*depth)
+  //     times before children have even run setup_saveable_settings().
+
   // Use a simple stackless recursion; depth is expected to be small.
   for (uint8_t i = 0; i < root->child_count; ++i) {
     ISaveableSettingHost* child = root->children[i].host;
