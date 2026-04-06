@@ -1,4 +1,7 @@
 // saveloadlib.cpp
+
+#if defined(ENABLE_SD) || defined(ENABLE_LITTLEFS)
+
 #include "saveloadlib.h"
 
 const char *warning_label = " - WARNING: no target nor getter func!";
@@ -418,3 +421,5 @@ void debug_print_file(const char *filename) {
     }
   // }
 }
+
+#endif

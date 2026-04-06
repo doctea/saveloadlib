@@ -89,11 +89,8 @@ static inline const char* sl_scope_to_string(sl_scope_t mask) {
             strcat(result, sl_scope_entries[i].name);
         }
     }
-    if (result[0] == '\0') {
-        char buf[8];
-        snprintf(buf, sizeof(buf), "0x%02X", (unsigned)mask);
-        return buf;
-    }
+    if (result[0] == '\0')
+        snprintf(result, sizeof(result), "0x%02X", (unsigned)mask);
     return result;
 }
 
