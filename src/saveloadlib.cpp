@@ -124,7 +124,7 @@ bool sl_load_from_file(const char* path, sl_scope_t scope) {
   if (sl_file_read_buf && sl_file_read_buf_size > 0) {
     size_t file_size = (size_t)f.size();
     if (file_size > 0 && file_size < sl_file_read_buf_size) {
-      Serial.printf("sl_load_from_file: reading whole file of size %lu into buffer...\n", file_size);
+      //Serial.printf("sl_load_from_file: reading whole file of size %lu into buffer...\n", file_size);
       size_t got = f.read((uint8_t*)sl_file_read_buf, file_size);
       f.close();
       sl_file_read_buf[got] = '\0';
@@ -147,7 +147,7 @@ bool sl_load_from_file(const char* path, sl_scope_t scope) {
     // File too large for buffer — fall through to streaming path.
   }
 
-  Serial.printf("sl_load_from_file: file size %lu exceeds buffer size %lu, falling back to streaming path...\n", (uint32_t)f.size(), (uint32_t)sl_file_read_buf_size);
+  //Serial.printf("sl_load_from_file: file size %lu exceeds buffer size %lu, falling back to streaming path...\n", (uint32_t)f.size(), (uint32_t)sl_file_read_buf_size);
 
   // --- Streaming fallback (line-by-line) ---
   while (f.available()) {
@@ -297,7 +297,7 @@ static void sl_print_recursive(ISaveableSettingHost* host, const char* prefix, S
   // Emit settings for this host
   for (uint8_t i = 0; i < host->setting_count; ++i) {
     if (!(host->settings[i].mask & scope)) {
-      Serial.printf("Skipping setting '%s' for host '%s' due to scope mismatch (slot mask 0x%02X, print scope 0x%02X)\n", host->settings[i].setting->label, host->path_segment, host->settings[i].mask, scope);
+      if (cb) cb("Skipping setting '%s' for host '%s' due to scope mismatch (slot mask 0x%02X, print scope 0x%02X)\n", host->settings[i].setting->label, host->path_segment, host->settings[i].mask, scope);
       continue;  // not in the requested scope
     }
     SaveableSettingBase* s = host->settings[i].setting;
