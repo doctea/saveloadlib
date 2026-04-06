@@ -89,7 +89,11 @@ bool sl_parse_line_buffer(char* linebuf, sl_scope_t scope) {
   // strip trailing newlines just in case
   while (L && (linebuf[L-1] == '\n' || linebuf[L-1] == '\r')) 
     linebuf[--L] = '\0';
- 
+
+  // skip blank lines and comment lines (e.g. version headers written by sl_save_to_file)
+  if (L == 0 || linebuf[0] == '#')
+    return false;
+
   // find '=' to split at; return if not found
   char* eq = strchr(linebuf, '=');
   if (!eq) 
@@ -201,6 +205,16 @@ static void sl_file_output_cb(const char* line) { globalFileWriter.writeLine(lin
 bool sl_save_to_file(ISaveableSettingHost* root, const char* path, sl_scope_t scope) {
   if (!root) return false;
   if (!globalFileWriter.begin(path)) return false;
+  // Write version + scope header lines at the top so the file's origin is identifiable.
+  // #saveloadlib_scope format: 0xNN:SYMBOLIC_NAMES  — hex mask before ':' for machine parsing,
+  // symbolic names after ':' for human readability.
+  char verhdr[128];
+  snprintf(verhdr, sizeof(verhdr), "#saveloadlib_version=" SL_LIB_VERSION);
+  globalFileWriter.writeLine(verhdr);
+  snprintf(verhdr, sizeof(verhdr), "#saveloadlib_format=" SL_FILE_FORMAT_VERSION_STR);
+  globalFileWriter.writeLine(verhdr);
+  snprintf(verhdr, sizeof(verhdr), "#saveloadlib_scope=0x%02X:%s", (unsigned)scope, sl_scope_to_string(scope));
+  globalFileWriter.writeLine(verhdr);
   char prefix[1] = {0};
   //Serial.printf("Saving to '%s' with scope mask 0x%02X... starting at %s\n", path, scope, root->path_segment);
   root->save_recursive(prefix, 0, sl_file_output_cb, scope);

@@ -29,6 +29,18 @@
 #endif
 
 // ---------------------------------------------------------------------------
+// Library and file-format version identifiers.
+// SL_LIB_VERSION must be kept in sync with the "version" field in library.json.
+// Bump SL_FILE_FORMAT_VERSION (integer) when the on-disk format changes in a
+// backwards-incompatible way; reset it to 1 on major lib version bumps.
+// Both values are written as comment lines at the top of every saved file and
+// are safely ignored during loading.
+// ---------------------------------------------------------------------------
+#define SL_LIB_VERSION            "0.0.9"
+#define SL_FILE_FORMAT_VERSION    1
+#define SL_FILE_FORMAT_VERSION_STR "1"
+
+// ---------------------------------------------------------------------------
 // Save scope masks — each setting slot carries a bitmask of the scopes it
 // belongs to.  Save and load operations accept a scope mask and only visit
 // slots whose mask intersects the requested mask.
@@ -476,6 +488,16 @@ static inline void sl_register_root(ISaveableSettingHost* r) { SL_ROOT = r; }
 // Requires LinkedList.h to be already included (it is, via the saveloadlib.h header).
 static inline void sl_save_to_linkedlist(ISaveableSettingHost* root, LinkedList<String>& out, sl_scope_t scope = SL_SCOPE_ALL) {
   if (!root) return;
+  // Write version + scope header lines so the origin of the file is identifiable.
+  // #saveloadlib_scope format: 0xNN:SYMBOLIC_NAMES  — hex mask before ':' for machine parsing,
+  // symbolic names after ':' for human readability.
+  out.add(String(F("#saveloadlib_version=" SL_LIB_VERSION)));
+  out.add(String(F("#saveloadlib_format=" SL_FILE_FORMAT_VERSION_STR)));
+  {
+    char _scopehdr[80];
+    snprintf(_scopehdr, sizeof(_scopehdr), "#saveloadlib_scope=0x%02X:%s", (unsigned)scope, sl_scope_to_string(scope));
+    out.add(String(_scopehdr));
+  }
   char prefix[2] = {0};
   root->save_recursive(prefix, 0,
     [](const char* line, void* ctx) {
