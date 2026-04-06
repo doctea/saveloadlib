@@ -197,7 +197,7 @@ struct ISaveableSettingHost {
   // allow_replace: if true, attempt to replace an existing slot with the same label first
   //               (the slot's existing mask is preserved when replacing).
   // returns true on 
-  bool register_setting(SaveableSettingBase* setting, bool allow_replace = false, sl_scope_t mask = SL_SCOPE_ALL) {
+  bool register_setting(SaveableSettingBase* setting, sl_scope_t mask = SL_SCOPE_ALL, bool allow_replace = false) {
     if (!setting || !setting->label || !setting->label[0]) return false;
 
     if (allow_replace) {
@@ -250,7 +250,7 @@ struct ISaveableSettingHost {
       return true;
     }
     if (allow_add) {
-      return register_setting(newSetting, false, add_mask);
+      return register_setting(newSetting, add_mask, false);
     }
     return false;
   }
@@ -483,12 +483,15 @@ struct SL_TreeCounts {
   uint32_t bytes;     // estimated memory: node structs + inline arrays + heap-allocated settings
 };
 
-extern SL_TreeCounts sl_cached_tree_counts;  // last computed result
+extern SL_TreeCounts sl_cached_tree_counts;  // last computed result (SL_SCOPE_ALL only)
 extern bool          sl_tree_counts_valid;   // false after any sl_setup_all call
 
 // Walk the tree and count nodes + settings.
-// Result is cached; pass force=true to force a re-walk.
-SL_TreeCounts sl_count_tree(ISaveableSettingHost* root, bool force = false);
+// scope: when SL_SCOPE_ALL the result is cached (pass force=true to re-walk).
+//        when a specific scope mask is given the walk is always fresh (not cached),
+//        and only settings whose mask intersects scope are counted in .settings and
+//        their heap bytes in .bytes; .nodes counts every traversed node regardless.
+SL_TreeCounts sl_count_tree(ISaveableSettingHost* root, bool force = false, sl_scope_t scope = SL_SCOPE_ALL);
 
 // Print callback signature for each setting line
 using SL_PrintCallback = void(*)(const char* line, void* user_ctx);
