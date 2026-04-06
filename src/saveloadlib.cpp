@@ -322,6 +322,14 @@ static void sl_print_recursive(ISaveableSettingHost* host, const char* prefix, S
     if (cb) cb(linebuf, ctx);
   }
 
+  // Dynamic entries (e.g. routing connections) — must come before children so the node's
+  // own dynamic output groups with its registered settings in the printed tree.
+  {
+    char fullpref[SL_MAX_LINE];
+    sl_build_prefix(fullpref, sizeof(fullpref), prefix, host->path_segment);
+    host->print_dynamic_entries(fullpref, cb, ctx, scope);
+  }
+
   // Recurse into children
   for (uint8_t c = 0; c < host->child_count; ++c) {
     ISaveableSettingHost* child = host->children[c].host;

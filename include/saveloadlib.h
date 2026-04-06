@@ -44,6 +44,76 @@ static constexpr sl_scope_t SL_SCOPE_ROUTING = 0x08;  // bit 3 — MIDI routing 
 // bits 4..7 reserved for future levels
 static constexpr sl_scope_t SL_SCOPE_ALL     = 0xFF;  // default: slot belongs to every scope
 
+// ---------------------------------------------------------------------------
+// Scope debug helpers — sl_scope_to_string() and sl_scope_from_string()
+// ---------------------------------------------------------------------------
+
+// Entry mapping a single scope bit to its canonical name.
+struct sl_scope_entry {
+    sl_scope_t  mask;
+    const char* name;
+};
+
+// Single source of truth for scope bit↔name mapping.
+// Add new SL_SCOPE_* bits here; both helper functions pick them up automatically.
+static const sl_scope_entry sl_scope_entries[] = {
+    { SL_SCOPE_SYSTEM,  "SL_SCOPE_SYSTEM"  },
+    { SL_SCOPE_PROJECT, "SL_SCOPE_PROJECT" },
+    { SL_SCOPE_SCENE,   "SL_SCOPE_SCENE"   },
+    { SL_SCOPE_ROUTING, "SL_SCOPE_ROUTING" },
+};
+static constexpr size_t SL_SCOPE_ENTRY_COUNT = sizeof(sl_scope_entries) / sizeof(sl_scope_entries[0]);
+
+// Returns a human-readable string like "SL_SCOPE_PROJECT|SL_SCOPE_SCENE".
+// SL_SCOPE_ALL (0xFF) is returned as the literal "SL_SCOPE_ALL".
+// An unrecognised bitmask falls back to a hex representation, e.g. "0x10".
+static inline const char* sl_scope_to_string(sl_scope_t mask) {
+    if (mask == SL_SCOPE_ALL) return "SL_SCOPE_ALL";
+    static char result[128];
+    result[0] = '\0';
+    for (size_t i = 0; i < SL_SCOPE_ENTRY_COUNT; ++i) {
+        if (mask & sl_scope_entries[i].mask) {
+            if (result[0] != '\0') strcat(result, "|");
+            strcat(result, sl_scope_entries[i].name);
+        }
+    }
+    if (result[0] == '\0') {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "0x%02X", (unsigned)mask);
+        return buf;
+    }
+    return result;
+}
+
+// Parses a string like "SL_SCOPE_PROJECT|SL_SCOPE_SCENE" and returns the
+// equivalent bitmask.  Tokens are separated by '|'; surrounding whitespace is
+// stripped.  "SL_SCOPE_ALL" is handled as a special case.  Unknown tokens are
+// silently skipped (result is 0 for a completely unrecognised string).
+static inline sl_scope_t sl_scope_from_string(const char* str) {
+    if (!str) return 0;
+    if (strcmp(str, "SL_SCOPE_ALL") == 0) return SL_SCOPE_ALL;
+    sl_scope_t result = 0;
+    char buf[128];
+    strncpy(buf, str, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    char* token = strtok(buf, "|");
+    while (token) {
+        // trim leading whitespace
+        while (*token == ' ' || *token == '\t') ++token;
+        // trim trailing whitespace
+        char* end = token + strlen(token);
+        while (end > token && (*(end-1) == ' ' || *(end-1) == '\t')) *(--end) = '\0';
+        for (size_t i = 0; i < SL_SCOPE_ENTRY_COUNT; ++i) {
+            if (strcmp(token, sl_scope_entries[i].name) == 0) {
+                result |= sl_scope_entries[i].mask;
+                break;
+            }
+        }
+        token = strtok(nullptr, "|");
+    }
+    return result;
+}
+
 extern const char *warning_label;
 extern char linebuf[SL_MAX_LINE];
 
@@ -131,6 +201,9 @@ struct SaveableSettingBase {
     ::operator delete(p);
   }
 };
+
+// Print callback signature for each setting line (declared here so ISaveableSettingHost can use it)
+using SL_PrintCallback = void(*)(const char* line, void* user_ctx);
 
 struct ISaveableSettingHost {
   const char* path_segment = "";
@@ -254,6 +327,13 @@ struct ISaveableSettingHost {
     }
     return false;
   }
+
+  // Hook for nodes that have dynamic (runtime-generated) entries not stored in settings[].
+  // Called by sl_print_recursive after iterating registered settings, so they appear in showtree.
+  // prefix already includes this node's own path_segment (i.e. it is the full parent path of any
+  // dynamic key, matching what save_recursive passes to _emit_routing_lines etc.).
+  // Default: no-op.
+  virtual void print_dynamic_entries(const char* /*prefix*/, SL_PrintCallback /*cb*/, void* /*ctx*/, sl_scope_t /*scope*/) {}
 
   bool remove_setting_by_label(const char* label) {
     int idx = find_setting_index(label);
@@ -492,9 +572,6 @@ extern bool          sl_tree_counts_valid;   // false after any sl_setup_all cal
 //        and only settings whose mask intersects scope are counted in .settings and
 //        their heap bytes in .bytes; .nodes counts every traversed node regardless.
 SL_TreeCounts sl_count_tree(ISaveableSettingHost* root, bool force = false, sl_scope_t scope = SL_SCOPE_ALL);
-
-// Print callback signature for each setting line
-using SL_PrintCallback = void(*)(const char* line, void* user_ctx);
 
 // Print the whole tree to an Arduino Print object (Serial, etc.)
 void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_depth = 8, sl_scope_t scope = SL_SCOPE_ALL);
