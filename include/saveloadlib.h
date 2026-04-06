@@ -33,13 +33,13 @@
 // belongs to.  Save and load operations accept a scope mask and only visit
 // slots whose mask intersects the requested mask.
 //
-// Canonical load order: SL_SCOPE_SYSTEM → SL_SCOPE_PROJECT → SL_SCOPE_PATTERN
+// Canonical load order: SL_SCOPE_SYSTEM → SL_SCOPE_PROJECT → SL_SCOPE_SCENE
 // Later loads override earlier ones for settings that appear in multiple scopes.
 // ---------------------------------------------------------------------------
 using sl_scope_t = uint8_t;
 static constexpr sl_scope_t SL_SCOPE_SYSTEM  = 0x01;  // bit 0 — device-wide settings
 static constexpr sl_scope_t SL_SCOPE_PROJECT = 0x02;  // bit 1 — project/song settings
-static constexpr sl_scope_t SL_SCOPE_PATTERN = 0x04;  // bit 2 — per-pattern settings
+static constexpr sl_scope_t SL_SCOPE_SCENE = 0x04;  // bit 2 — per-pattern settings
 static constexpr sl_scope_t SL_SCOPE_ROUTING = 0x08;  // bit 3 — MIDI routing / connection matrix
 // bits 4..7 reserved for future levels
 static constexpr sl_scope_t SL_SCOPE_ALL     = 0xFF;  // default: slot belongs to every scope
