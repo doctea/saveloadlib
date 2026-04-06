@@ -155,7 +155,7 @@ Each registered setting slot carries a small bitmask (`sl_scope_t`) that identif
 |---|---|---|
 | `SL_SCOPE_SYSTEM`  | `0x01` | Device-wide settings (MIDI channel, clock source, …) |
 | `SL_SCOPE_PROJECT` | `0x02` | Per-project / per-song settings |
-| `SL_SCOPE_PATTERN` | `0x04` | Per-pattern settings |
+| `SL_SCOPE_SCENE`   | `0x04` | Per-scene settings |
 | `SL_SCOPE_ALL`     | `0xFF` | **Default** — slot participates in every scope |
 
 Bits `0x08`–`0x80` are reserved for future levels.
@@ -175,9 +175,9 @@ virtual void setup_saveable_settings() override {
     register_setting(new LSaveableSetting<uint8_t>("midi_channel", "MyClass", &this->midi_ch),
                      false, SL_SCOPE_SYSTEM);
 
-    // saved in both project and pattern files
+    // saved in both project and scene files
     register_setting(new LSaveableSetting<float>("volume", "MyClass", &this->volume),
-                     false, SL_SCOPE_PROJECT | SL_SCOPE_PATTERN);
+                     false, SL_SCOPE_PROJECT | SL_SCOPE_SCENE);
 }
 ```
 
@@ -203,21 +203,21 @@ Define a mapping array and use the helper functions to save or load all scopes i
 static const SL_ScopeTarget scopes[] = {
     { SL_SCOPE_SYSTEM,  "/save/system.txt"  },
     { SL_SCOPE_PROJECT, "/save/project.txt" },
-    { SL_SCOPE_PATTERN, "/save/pattern.txt" },
+    { SL_SCOPE_SCENE,   "/save/scene.txt"   },
 };
 constexpr uint8_t NUM_SCOPES = 3;
 
 // Save all three files
 sl_save_all_scopes(SL_ROOT, scopes, NUM_SCOPES);
 
-// Load all three files in canonical order (system → project → pattern)
+// Load all three files in canonical order (system → project → scene)
 // Later loads override earlier ones for settings that appear in multiple scopes.
 sl_load_all_scopes(scopes, NUM_SCOPES);
 ```
 
 ### Canonical load order
 
-Load scopes in order from most-global to most-specific: **system → project → pattern**. Because later loads overwrite earlier values for settings tagged with multiple scopes (e.g. `SL_SCOPE_PROJECT | SL_SCOPE_PATTERN`), the most-specific file wins — which is usually the desired behaviour.
+Load scopes in order from most-global to most-specific: **system → project → scene**. Because later loads overwrite earlier values for settings tagged with multiple scopes (e.g. `SL_SCOPE_PROJECT | SL_SCOPE_SCENE`), the most-specific file wins — which is usually the desired behaviour.
 
 ### Scope gotcha: silent non-apply on mismatch
 

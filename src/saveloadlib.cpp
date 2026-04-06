@@ -7,6 +7,26 @@ ISaveableSettingHost* SL_ROOT = nullptr;  // single definition; extern-declared 
 
 SL_ArenaBase* sl_setting_arena = nullptr;  // global arena for SaveableSettingBase::operator new
 
+// ---------------------------------------------------------------------------
+// Optional bulk file-read buffer
+// ---------------------------------------------------------------------------
+// When registered via sl_set_file_read_buffer(), sl_load_from_file() reads
+// the whole file in one shot then parses line-by-line entirely in RAM.
+// This avoids repeated SD readBytesUntil() calls, each of which carries
+// card-latency overhead.  Typically 3-5× faster on FAT SD for medium files.
+//
+// The buffer need not be in fast RAM — even an EXTMEM buffer is fine because
+// sequential reads from a flat RAM region are far cheaper than SD I/O.
+// If the file is larger than the buffer, or no buffer is registered, the
+// original line-by-line streaming path is used transparently.
+static char*  sl_file_read_buf      = nullptr;
+static size_t sl_file_read_buf_size = 0;
+
+void sl_set_file_read_buffer(char* buf, size_t size) {
+  sl_file_read_buf      = buf;
+  sl_file_read_buf_size = size;
+}
+
 char linebuf[SL_MAX_LINE];  // shared buffer for constructing lines to save
 
 SL_TreeCounts sl_cached_tree_counts = {0, 0, 0};
@@ -98,6 +118,38 @@ bool sl_load_from_file(const char* path, sl_scope_t scope) {
 #endif
   if (!f) return false;
 
+  // --- Bulk-read path ---
+  // Use when a pre-allocated buffer is registered and the file fits inside it.
+  // Reads the entire file in one call, then parses purely in RAM.
+  if (sl_file_read_buf && sl_file_read_buf_size > 0) {
+    size_t file_size = (size_t)f.size();
+    if (file_size > 0 && file_size < sl_file_read_buf_size) {
+      Serial.printf("sl_load_from_file: reading whole file of size %lu into buffer...\n", file_size);
+      size_t got = f.read((uint8_t*)sl_file_read_buf, file_size);
+      f.close();
+      sl_file_read_buf[got] = '\0';
+
+      // Walk the flat buffer, splitting on '\n' in-place.
+      char* p   = sl_file_read_buf;
+      char* end = sl_file_read_buf + got;
+      while (p < end) {
+        char* nl = (char*)memchr(p, '\n', end - p);
+        size_t len = nl ? (size_t)(nl - p) : (size_t)(end - p);
+        if (len > 0 && len < SL_MAX_LINE) {
+          memcpy(linebuf, p, len);
+          linebuf[len] = '\0';
+          sl_parse_line_buffer(linebuf, scope);
+        }
+        p = nl ? nl + 1 : end;
+      }
+      return true;
+    }
+    // File too large for buffer — fall through to streaming path.
+  }
+
+  Serial.printf("sl_load_from_file: file size %lu exceeds buffer size %lu, falling back to streaming path...\n", (uint32_t)f.size(), (uint32_t)sl_file_read_buf_size);
+
+  // --- Streaming fallback (line-by-line) ---
   while (f.available()) {
     size_t n = f.readBytesUntil('\n', linebuf, sizeof(linebuf) - 1);
     linebuf[n] = '\0';

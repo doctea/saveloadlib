@@ -39,7 +39,7 @@
 using sl_scope_t = uint8_t;
 static constexpr sl_scope_t SL_SCOPE_SYSTEM  = 0x01;  // bit 0 — device-wide settings
 static constexpr sl_scope_t SL_SCOPE_PROJECT = 0x02;  // bit 1 — project/song settings
-static constexpr sl_scope_t SL_SCOPE_SCENE = 0x04;  // bit 2 — per-pattern settings
+static constexpr sl_scope_t SL_SCOPE_SCENE = 0x04;  // bit 2 — per-scene settings
 static constexpr sl_scope_t SL_SCOPE_ROUTING = 0x08;  // bit 3 — MIDI routing / connection matrix
 // bits 4..7 reserved for future levels
 static constexpr sl_scope_t SL_SCOPE_ALL     = 0xFF;  // default: slot belongs to every scope
@@ -414,6 +414,26 @@ bool sl_parse_line_buffer(char* linebuf, sl_scope_t scope = SL_SCOPE_ALL);
 bool sl_load_from_file(const char* path, sl_scope_t scope = SL_SCOPE_ALL);
 bool sl_load_from_linkedlist(const char* path, const LinkedList<String>& lines, sl_scope_t scope = SL_SCOPE_ALL);
 bool sl_save_to_file(ISaveableSettingHost* root, const char* path, sl_scope_t scope = SL_SCOPE_ALL);
+
+// ---------------------------------------------------------------------------
+// Optional bulk file-read buffer
+// ---------------------------------------------------------------------------
+// Register a pre-allocated buffer before calling sl_load_from_file().
+// When set, the entire file is read in one shot and parsed in RAM —
+// typically 3-5× faster than line-by-line SD streaming.
+//
+// The buffer can be anywhere (DTCM, EXTMEM, BSS).
+// Size it to comfortably exceed your largest save file.
+// Falls back to line-by-line streaming if the file doesn't fit.
+//
+// Example (Teensy EXTMEM — one large allocation):
+//   EXTMEM static char sl_file_buf[65536];
+//   sl_set_file_read_buffer(sl_file_buf, sizeof(sl_file_buf));
+//
+// Example (RP2350 — ordinary BSS):
+//   static char sl_file_buf[32768];
+//   sl_set_file_read_buffer(sl_file_buf, sizeof(sl_file_buf));
+void sl_set_file_read_buffer(char* buf, size_t size);
 
 // ---------------------------------------------------------------------------
 // Multi-scope save/load helpers
