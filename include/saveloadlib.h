@@ -432,17 +432,17 @@ SL_TreeCounts sl_count_tree(ISaveableSettingHost* root, bool force = false);
 using SL_PrintCallback = void(*)(const char* line, void* user_ctx);
 
 // Print the whole tree to an Arduino Print object (Serial, etc.)
-void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_depth = 8);
+void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_depth = 8, sl_scope_t scope = SL_SCOPE_ALL);
 
 // Walk the tree and call a callback for each printed line
-void sl_print_tree_with_callback(ISaveableSettingHost* root, SL_PrintCallback cb, void* user_ctx = nullptr, uint8_t max_depth = 8);
+void sl_print_tree_with_callback(ISaveableSettingHost* root, SL_PrintCallback cb, void* user_ctx = nullptr, uint8_t max_depth = 8, sl_scope_t scope = SL_SCOPE_ALL);
 
 void debug_print_file(const char *filename);
 
 
 #include "functional-vlpp.h"
 using SL_PrintLambda = vl::Func<void(const char*)>;
-void sl_print_tree_with_lambda(ISaveableSettingHost* root, SL_PrintLambda lambda, uint8_t max_depth = 8);
+void sl_print_tree_with_lambda(ISaveableSettingHost* root, SL_PrintLambda lambda, uint8_t max_depth = 8, sl_scope_t scope = SL_SCOPE_ALL);
 
 // #include "functional-vlpp.h"
 // using SL_PrintLambda = vl::Func<void(const char* line, void* user_ctx)>;

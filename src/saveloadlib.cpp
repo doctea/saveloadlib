@@ -214,7 +214,7 @@ static void sl_build_prefix(char* dest, size_t dest_size, const char* prefix, co
 }
 
 // Internal recursive walker that emits lines via callback
-static void sl_print_recursive(ISaveableSettingHost* host, const char* prefix, SL_PrintCallback cb, void* ctx, uint8_t depth, uint8_t max_depth) {
+static void sl_print_recursive(ISaveableSettingHost* host, const char* prefix, SL_PrintCallback cb, void* ctx, uint8_t depth, uint8_t max_depth, sl_scope_t scope = SL_SCOPE_ALL) {
   if (!host || depth > max_depth) {
     if (depth > max_depth && cb) {
       char linebuf[SL_MAX_LINE];
@@ -237,6 +237,10 @@ static void sl_print_recursive(ISaveableSettingHost* host, const char* prefix, S
 
   // Emit settings for this host
   for (uint8_t i = 0; i < host->setting_count; ++i) {
+    if (!(host->settings[i].mask & scope)) {
+      Serial.printf("Skipping setting '%s' for host '%s' due to scope mismatch (slot mask 0x%02X, print scope 0x%02X)\n", host->settings[i].setting->label, host->path_segment, host->settings[i].mask, scope);
+      continue;  // not in the requested scope
+    }
     SaveableSettingBase* s = host->settings[i].setting;
     if (!s) continue;
     // build full path: prefix~hostseg~key  or hostseg~key if no prefix
@@ -262,12 +266,12 @@ static void sl_print_recursive(ISaveableSettingHost* host, const char* prefix, S
     // build new prefix for child: prefix~hostseg
     char childpref[SL_MAX_LINE];
     sl_build_prefix(childpref, sizeof(childpref), prefix, host->path_segment);
-    sl_print_recursive(child, childpref, cb, ctx, depth + 1, max_depth);
+    sl_print_recursive(child, childpref, cb, ctx, depth + 1, max_depth, scope);
   }
 }
 
 // Public: print to Arduino Print (Serial)
-void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_depth) {
+void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_depth, sl_scope_t scope) {
   if (!root) return;
   // callback that writes to Print
   auto write_cb = [](const char* line, void* ctx) {
@@ -275,23 +279,23 @@ void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_
     p->println(line);
     p->flush();
   };
-  sl_print_recursive(root, "", write_cb, &out, 0, max_depth);
+  sl_print_recursive(root, "", write_cb, &out, 0, max_depth, scope);
 }
 
 // Public: print with user callback
-void sl_print_tree_with_callback(ISaveableSettingHost* root, SL_PrintCallback cb, void* user_ctx, uint8_t max_depth) {
+void sl_print_tree_with_callback(ISaveableSettingHost* root, SL_PrintCallback cb, void* user_ctx, uint8_t max_depth, sl_scope_t scope) {
   if (!root || !cb) return;
-  sl_print_recursive(root, "", cb, user_ctx, 0, max_depth);
+  sl_print_recursive(root, "", cb, user_ctx, 0, max_depth, scope);
 }
 
 // Public: print with vl::Func lambda (no user_ctx needed - lambda captures its own state)
-void sl_print_tree_with_lambda(ISaveableSettingHost* root, SL_PrintLambda lambda, uint8_t max_depth) {
+void sl_print_tree_with_lambda(ISaveableSettingHost* root, SL_PrintLambda lambda, uint8_t max_depth, sl_scope_t scope) {
   if (!root) return;
   // bridge: store lambda pointer in ctx, invoke via plain callback
   auto bridge_cb = [](const char* line, void* ctx) {
     (*reinterpret_cast<SL_PrintLambda*>(ctx))(line);
   };
-  sl_print_recursive(root, "", bridge_cb, &lambda, 0, max_depth);
+  sl_print_recursive(root, "", bridge_cb, &lambda, 0, max_depth, scope);
 }
 
 void debug_print_file(const char *filename) {
