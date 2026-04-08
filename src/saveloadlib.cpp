@@ -361,11 +361,13 @@ static void sl_print_recursive(ISaveableSettingHost* host, const char* prefix, S
 // Public: print to Arduino Print (Serial)
 void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_depth, sl_scope_t scope) {
   if (!root) return;
-  // callback that writes to Print
+  // NOTE: no flush() calls here at all (not per-line, not at end).
+  // On RP2040/TinyUSB, flush() calls tud_task() which dispatches all USB events
+  // (MIDI RX, CDC RX etc.) — dangerous during setup() and expensive at any time.
+  // This function is often called from within ATOMIC()/critical sections where
+  // flushing with interrupts disabled would deadlock.  Callers flush as needed.
   auto write_cb = [](const char* line, void* ctx) {
-    Print* p = reinterpret_cast<Print*>(ctx);
-    p->println(line);
-    p->flush();
+    reinterpret_cast<Print*>(ctx)->println(line);
   };
   sl_print_recursive(root, "", write_cb, &out, 0, max_depth, scope);
 }
@@ -384,6 +386,47 @@ void sl_print_tree_with_lambda(ISaveableSettingHost* root, SL_PrintLambda lambda
     (*reinterpret_cast<SL_PrintLambda*>(ctx))(line);
   };
   sl_print_recursive(root, "", bridge_cb, &lambda, 0, max_depth, scope);
+}
+
+// ---------------------------------------------------------------------------
+// Tree validation
+// ---------------------------------------------------------------------------
+static bool sl_validate_tree_recursive(ISaveableSettingHost* host, Print& out, uint8_t depth) {
+  if (!host) return true;
+  bool ok = true;
+  const char* seg = (host->path_segment && host->path_segment[0]) ? host->path_segment : "(root)";
+
+  Serial.printf("SL_VALIDATE: checking node at depth %u named '%s'...\n", depth, seg);
+
+  if (!host->path_segment || host->path_segment[0] == '\0') {
+    out.printf("SL_VALIDATE WARNING [depth %u] @unknown: empty path segment - this node will be inaccessible via saveloadlib and won't be saved/loaded\n", depth);
+    ok = false;
+  } else if (strchr(host->path_segment, '~')) {
+    out.printf("SL_VALIDATE WARNING [depth %u] '%s': path segment contains invalid character '~' - this node will be inaccessible via saveloadlib and won't be saved/loaded\n", depth, seg);
+    ok = false;
+  }
+  if (host->max_settings > 0 && host->setting_count >= host->max_settings) {
+    out.printf("SL_VALIDATE WARNING [depth %u] '%s': settings at capacity (%u/%u)"
+               " - any excess register_setting() calls were silently dropped\n",
+               depth, seg, host->setting_count, host->max_settings);
+    ok = false;
+  }
+  if (host->max_children > 0 && host->child_count >= host->max_children) {
+    out.printf("SL_VALIDATE WARNING [depth %u] '%s': children at capacity (%u/%u)"
+               " - any excess register_child() calls were silently dropped\n",
+               depth, seg, host->child_count, host->max_children);
+    ok = false;
+  }
+  for (uint8_t i = 0; i < host->child_count; ++i)
+    ok &= sl_validate_tree_recursive(host->children[i].host, out, depth + 1);
+  return ok;
+}
+
+bool sl_validate_tree(ISaveableSettingHost* root, Print& out) {
+  if (!root) { out.println(F("SL_VALIDATE: root is null")); return false; }
+  bool ok = sl_validate_tree_recursive(root, out, 0);
+  if (ok) out.println(F("SL_VALIDATE: tree OK - no nodes at capacity or missing path segments!"));
+  return ok;
 }
 
 void debug_print_file(const char *filename) {

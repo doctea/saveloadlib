@@ -263,7 +263,7 @@ struct ISaveableSettingHost {
     set_path_segment(buf);
   }
 
-  void register_child(ISaveableSettingHost* child) {
+  virtual void register_child(ISaveableSettingHost* child) {
     if (child_count < max_children && child && child->path_segment) {
       children[child_count].host = child;
       children[child_count].seg = child->path_segment;
@@ -278,8 +278,8 @@ struct ISaveableSettingHost {
   //               existing registrations continue to participate in every scope.
   // allow_replace: if true, attempt to replace an existing slot with the same label first
   //               (the slot's existing mask is preserved when replacing).
-  // returns true on 
-  bool register_setting(SaveableSettingBase* setting, sl_scope_t mask = SL_SCOPE_ALL, bool allow_replace = false) {
+  // returns true on success
+  virtual bool register_setting(SaveableSettingBase* setting, sl_scope_t mask = SL_SCOPE_ALL, bool allow_replace = false) {
     if (!setting || !setting->label || !setting->label[0]) return false;
 
     if (allow_replace) {
@@ -477,6 +477,101 @@ struct SHStorage : virtual public ISaveableSettingHost {
 using SHLeaf    = SHStorage<0,  SL_MAX_SETTINGS>;  // no children, default settings
 using SHNode    = SHStorage<SL_MAX_CHILDREN, SL_MAX_SETTINGS>; // full size (backwards compat)
 
+// ---------------------------------------------------------------------------
+// SHDynamic — heap-backed alternative to SHStorage; never silently drops
+// registrations.  Arrays start small and double on each overflow.
+//
+// The tree is expected to be static after sl_setup_all() (true for all
+// Arduino sketches), so there is no fragmentation concern: all allocations
+// happen once during setup() and are never freed.
+//
+// Usage: inherit instead of SHStorage<NCH,NSET>:
+//   class MyThing : public SHDynamic<4, 16> { ... };
+//
+// SHDynamic supports the same virtual-inheritance size-override pattern as
+// SHStorage.  The most-derived SHDynamic<NCH,NSET> constructor runs last and
+// its NCH/NSET values win (used as first-allocation sizes):
+//   class Base    : virtual public SHDynamic<2, 8>  { ... };
+//   class Derived : public Base, virtual public SHDynamic<8, 16> { ... };
+//
+// Implementation note: the grow logic and the virtual overrides live in a
+// single non-templated SHDynamicBase.  SHDynamic<NCH,NSET> is a thin wrapper
+// that only sets the initial-allocation sizes via its constructor.  This
+// ensures exactly one override of register_child/register_setting exists in
+// the vtable regardless of how many SHDynamic<X,Y> instantiations appear in
+// the inheritance chain.
+// ---------------------------------------------------------------------------
+
+// Non-templated base: holds all the logic.  Do not inherit this directly;
+// use SHDynamic<NCH,NSET> below.
+struct SHDynamicBase : virtual public ISaveableSettingHost {
+  // Initial allocation sizes, written by each SHDynamic<NCH,NSET> constructor.
+  // The most-derived one runs last and wins.
+  uint8_t _init_children = 4;
+  uint8_t _init_settings = 8;
+
+  ~SHDynamicBase() override {
+    delete[] children;
+    delete[] settings;
+    children = nullptr;
+    settings = nullptr;
+  }
+
+  void register_child(ISaveableSettingHost* child) override {
+    if (!child || !child->path_segment) return;
+    if (child_count >= max_children) _grow_children();
+    children[child_count].host = child;
+    children[child_count].seg  = child->path_segment;
+    children[child_count].hash = sl_fnv1a_16(child->path_segment);
+    child_count++;
+  }
+
+  bool register_setting(SaveableSettingBase* setting, sl_scope_t mask = SL_SCOPE_ALL, bool allow_replace = false) override {
+    if (!setting || !setting->label || !setting->label[0]) return false;
+    if (allow_replace) {
+      if (replace_setting_by_label(setting->label, setting)) return true;
+    }
+    if (setting_count >= max_settings) _grow_settings();
+    settings[setting_count].setting = setting;
+    settings[setting_count].key     = setting->label;
+    settings[setting_count].hash    = sl_fnv1a_16(setting->label);
+    settings[setting_count].mask    = mask;
+    ++setting_count;
+    return true;
+  }
+
+private:
+  void _grow_children() {
+    uint8_t new_max = (max_children == 0) ? (_init_children > 0 ? _init_children : 4)
+                    : (max_children <= 127 ? max_children * 2 : 255);
+    ChildEntry* arr = new ChildEntry[new_max];
+    if (children && child_count) memcpy(arr, children, child_count * sizeof(ChildEntry));
+    delete[] children;
+    children     = arr;
+    max_children = new_max;
+  }
+
+  void _grow_settings() {
+    uint8_t new_max = (max_settings == 0) ? (_init_settings > 0 ? _init_settings : 8)
+                    : (max_settings <= 127 ? max_settings * 2 : 255);
+    SettingEntry* arr = new SettingEntry[new_max];
+    if (settings && setting_count) memcpy(arr, settings, setting_count * sizeof(SettingEntry));
+    delete[] settings;
+    settings     = arr;
+    max_settings = new_max;
+  }
+};
+
+// Templated wrapper: sets initial allocation sizes, then defers everything
+// else to SHDynamicBase.  Inherit this in your classes.
+template<uint8_t NCH, uint8_t NSET>
+struct SHDynamic : virtual public SHDynamicBase {
+  SHDynamic() {
+    _init_children = NCH;
+    _init_settings = NSET;
+  }
+};
+
 
 extern ISaveableSettingHost* SL_ROOT;
 static inline void sl_register_root(ISaveableSettingHost* r) { SL_ROOT = r; }
@@ -591,6 +686,22 @@ extern bool          sl_tree_counts_valid;   // false after any sl_setup_all cal
 //        and only settings whose mask intersects scope are counted in .settings and
 //        their heap bytes in .bytes; .nodes counts every traversed node regardless.
 SL_TreeCounts sl_count_tree(ISaveableSettingHost* root, bool force = false, sl_scope_t scope = SL_SCOPE_ALL);
+
+// ---------------------------------------------------------------------------
+// Tree validation
+// ---------------------------------------------------------------------------
+// Walk every node and warn about any SHStorage node that is at capacity
+// (setting_count == max_settings or child_count == max_children).
+// A node at capacity after sl_setup_all() silently dropped any further
+// register_setting()/register_child() calls — this function makes that visible.
+// SHDynamic nodes are never at capacity, so they will never trigger a warning.
+//
+// Prints one warning line per saturated node; prints an "OK" line if clean.
+// Returns true if no issues found, false if any warnings were emitted.
+//
+// Recommended usage at the end of setup():
+//   sl_validate_tree(SL_ROOT, Serial);
+bool sl_validate_tree(ISaveableSettingHost* root, Print& out);
 
 // Print the whole tree to an Arduino Print object (Serial, etc.)
 void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_depth = 8, sl_scope_t scope = SL_SCOPE_ALL);
