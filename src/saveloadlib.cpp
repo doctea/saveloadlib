@@ -283,13 +283,25 @@ void sl_setup_all(ISaveableSettingHost* root) {
 // Internal helper: append segment to prefix into dest buffer
 static void sl_build_prefix(char* dest, size_t dest_size, const char* prefix, const char* seg) {
   if (!seg || seg[0] == '\0') {
-    if (prefix && prefix[0]) strncpy(dest, prefix, dest_size);
-    else dest[0] = '\0';
+    if (prefix && prefix[0]) {
+      if (dest != prefix) strncpy(dest, prefix, dest_size);
+      // dest == prefix: already contains the right value, nothing to do
+    } else dest[0] = '\0';
     return;
   }
   if (!prefix || prefix[0] == '\0') {
     strncpy(dest, seg, dest_size);
     dest[dest_size - 1] = '\0';
+  } else if (dest == prefix) {
+    // In-place append "~seg" — prefix content is already in dest, just extend it.
+    size_t plen = strlen(dest);
+    size_t slen = strlen(seg);
+    if (plen + 1 + slen < dest_size) {
+      dest[plen] = '~';
+      memcpy(dest + plen + 1, seg, slen + 1);
+    } else {
+      dest[dest_size - 1] = '\0'; // truncate silently
+    }
   } else {
     // prefix~seg
     snprintf(dest, dest_size, "%s~%s", prefix, seg);
@@ -297,69 +309,99 @@ static void sl_build_prefix(char* dest, size_t dest_size, const char* prefix, co
 }
 
 // Internal recursive walker that emits lines via callback.
-// NOTE: linebuf/fullpref/childpref are static to avoid blowing the RP2040 stack.
-// SL_MAX_LINE=512 means 4 x 512-byte locals per frame; at max_depth=10 that is ~20 KB
-// of stack against an 8 KB core stack — instant stack overflow and crash.
-// Static is safe here because each buffer is written and fully consumed (via cb) before
-// any recursive call, so re-entrant use across depth levels does not occur.
-static void sl_print_recursive(ISaveableSettingHost* host, const char* prefix, SL_PrintCallback cb, void* ctx, uint8_t depth, uint8_t max_depth, sl_scope_t scope = SL_SCOPE_ALL) {
-  static char linebuf[SL_MAX_LINE];
-  static char fullpref[SL_MAX_LINE];
-  static char childpref[SL_MAX_LINE];
+//
+// Uses a path-accumulator (sl_path_buf / path_len) instead of passing a
+// prefix string by pointer.  Each frame appends "~seg" to the global buffer
+// on entry and truncates back to path_len on exit, like a string-stack.
+// This avoids all aliasing between the incoming prefix pointer and any
+// locally-built buffer: sl_path_buf is only ever appended to, and the old
+// length is restored on return so sibling children get a clean prefix.
+//
+// linebuf is still static: it is written and consumed (via cb) before any
+// recursive call, so it is safe to share across depth levels.
+static char sl_path_buf[SL_MAX_LINE * 2];  // deep path accumulator
+static char sl_linebuf_print[SL_MAX_LINE]; // print line assembly buffer
 
-  if (!host || depth > max_depth) {
-    if (depth > max_depth && cb) {
-      snprintf(linebuf, SL_MAX_LINE, "%s... (max depth %i reached in %s)", prefix, max_depth, host->path_segment ? host->path_segment : "unknown");
-      cb(linebuf, ctx);
+static void sl_print_recursive(ISaveableSettingHost* host, size_t path_len,
+                                SL_PrintCallback cb, void* ctx,
+                                uint8_t depth, uint8_t max_depth,
+                                sl_scope_t scope = SL_SCOPE_ALL) {
+  if (!host) return;
+
+  if (depth > max_depth) {
+    if (cb) {
+      snprintf(sl_linebuf_print, SL_MAX_LINE, "%.*s... (max depth %u reached in %s)",
+               (int)path_len, sl_path_buf, (unsigned)max_depth,
+               host->path_segment ? host->path_segment : "unknown");
+      cb(sl_linebuf_print, ctx);
     }
     return;
   }
 
-  // Print host header line
-  if (host->path_segment && host->path_segment[0]) {
-    if (prefix && prefix[0]) snprintf(linebuf, SL_MAX_LINE, "%s~%s:", prefix, host->path_segment);
-    else snprintf(linebuf, SL_MAX_LINE, "%s:", host->path_segment);
-  } else {
-    if (prefix && prefix[0]) snprintf(linebuf, SL_MAX_LINE, "%s:", prefix);
-    else snprintf(linebuf, SL_MAX_LINE, "root:");
+  // ----- Append this node's segment to the path accumulator -----
+  size_t old_len = path_len;
+  const char* seg = (host->path_segment && host->path_segment[0]) ? host->path_segment : nullptr;
+  if (seg) {
+    size_t seg_len = strlen(seg);
+    size_t buf_size = sizeof(sl_path_buf);
+    if (path_len == 0) {
+      // root level: just copy segment
+      if (seg_len < buf_size) {
+        memcpy(sl_path_buf, seg, seg_len);
+        path_len = seg_len;
+        sl_path_buf[path_len] = '\0';
+      }
+    } else {
+      // append "~seg"
+      if (path_len + 1 + seg_len < buf_size) {
+        sl_path_buf[path_len] = '~';
+        memcpy(sl_path_buf + path_len + 1, seg, seg_len);
+        path_len += 1 + seg_len;
+        sl_path_buf[path_len] = '\0';
+      }
+    }
   }
-  if (cb) cb(linebuf, ctx);
+  // sl_path_buf[0..path_len) now holds the full path of this node
 
-  // Emit settings for this host
+  // Print host header line
+  if (path_len)
+    snprintf(sl_linebuf_print, SL_MAX_LINE, "%.*s:", (int)path_len, sl_path_buf);
+  else
+    snprintf(sl_linebuf_print, SL_MAX_LINE, "root:");
+  if (cb) cb(sl_linebuf_print, ctx);
+
+  // Emit settings for this node
   for (uint8_t i = 0; i < host->setting_count; ++i) {
-    if (!(host->settings[i].mask & scope)) continue;  // not in the requested scope
+    if (!(host->settings[i].mask & scope)) continue;
     SaveableSettingBase* s = host->settings[i].setting;
     if (!s) continue;
-    // build full path: prefix~hostseg~key  or hostseg~key if no prefix
-    sl_build_prefix(fullpref, SL_MAX_LINE, prefix, host->path_segment);
-    // get value string from setting
-    const char* kv = s->get_line(); // returns "key=value" or "label=value"
-    // ensure we print as fullpath~key=value
+    const char* kv = s->get_line();
     const char* eq = strchr(kv, '=');
     const char* val = eq ? eq + 1 : "";
-    if (fullpref[0] == '\0') {
-      snprintf(linebuf, SL_MAX_LINE, "%s=%s", s->label, val);
-    } else {
-      snprintf(linebuf, SL_MAX_LINE, "%s~%s=%s", fullpref, s->label, val);
-    }
-    if (cb) cb(linebuf, ctx);
+    if (path_len)
+      snprintf(sl_linebuf_print, SL_MAX_LINE, "%.*s~%s=%s", (int)path_len, sl_path_buf, s->label, val);
+    else
+      snprintf(sl_linebuf_print, SL_MAX_LINE, "%s=%s", s->label, val);
+    if (cb) cb(sl_linebuf_print, ctx);
   }
 
-  // Dynamic entries (e.g. routing connections) — must come before children so the node's
-  // own dynamic output groups with its registered settings in the printed tree.
-  // fullpref is consumed by print_dynamic_entries before any recursive call below.
-  sl_build_prefix(fullpref, SL_MAX_LINE, prefix, host->path_segment);
-  host->print_dynamic_entries(fullpref, cb, ctx, scope);
+  // Dynamic entries (e.g. routing connections).
+  // sl_path_buf is stable here — no recursive call has happened yet.
+  sl_path_buf[path_len] = '\0';
+  host->print_dynamic_entries(sl_path_buf, cb, ctx, scope);
 
   // Recurse into children.
-  // childpref is rebuilt for each child and consumed (passed as prefix) before the next
-  // iteration rebuilds it, so the static buffer is safe across loop iterations.
+  // Before each child we restore sl_path_buf to our own path_len so every
+  // sibling gets the same clean prefix.
   for (uint8_t c = 0; c < host->child_count; ++c) {
     ISaveableSettingHost* child = host->children[c].host;
     if (!child) continue;
-    sl_build_prefix(childpref, SL_MAX_LINE, prefix, host->path_segment);
-    sl_print_recursive(child, childpref, cb, ctx, depth + 1, max_depth, scope);
+    sl_path_buf[path_len] = '\0';  // restore for this child
+    sl_print_recursive(child, path_len, cb, ctx, depth + 1, max_depth, scope);
   }
+
+  // Restore accumulator for our caller (sibling iteration above us).
+  sl_path_buf[old_len] = '\0';
 }
 
 // Public: print to Arduino Print (Serial)
@@ -373,13 +415,15 @@ void sl_print_tree_to_print(ISaveableSettingHost* root, Print& out, uint8_t max_
   auto write_cb = [](const char* line, void* ctx) {
     reinterpret_cast<Print*>(ctx)->println(line);
   };
-  sl_print_recursive(root, "", write_cb, &out, 0, max_depth, scope);
+  sl_path_buf[0] = '\0';
+  sl_print_recursive(root, 0, write_cb, &out, 0, max_depth, scope);
 }
 
 // Public: print with user callback
 void sl_print_tree_with_callback(ISaveableSettingHost* root, SL_PrintCallback cb, void* user_ctx, uint8_t max_depth, sl_scope_t scope) {
   if (!root || !cb) return;
-  sl_print_recursive(root, "", cb, user_ctx, 0, max_depth, scope);
+  sl_path_buf[0] = '\0';
+  sl_print_recursive(root, 0, cb, user_ctx, 0, max_depth, scope);
 }
 
 // Public: print with vl::Func lambda (no user_ctx needed - lambda captures its own state)
@@ -389,7 +433,8 @@ void sl_print_tree_with_lambda(ISaveableSettingHost* root, SL_PrintLambda lambda
   auto bridge_cb = [](const char* line, void* ctx) {
     (*reinterpret_cast<SL_PrintLambda*>(ctx))(line);
   };
-  sl_print_recursive(root, "", bridge_cb, &lambda, 0, max_depth, scope);
+  sl_path_buf[0] = '\0';
+  sl_print_recursive(root, 0, bridge_cb, &lambda, 0, max_depth, scope);
 }
 
 // ---------------------------------------------------------------------------
