@@ -53,6 +53,7 @@ static constexpr sl_scope_t SL_SCOPE_SYSTEM  = 0x01;  // bit 0 — device-wide s
 static constexpr sl_scope_t SL_SCOPE_PROJECT = 0x02;  // bit 1 — project/song settings
 static constexpr sl_scope_t SL_SCOPE_SCENE = 0x04;  // bit 2 — per-scene settings
 static constexpr sl_scope_t SL_SCOPE_ROUTING = 0x08;  // bit 3 — MIDI routing / connection matrix
+static constexpr sl_scope_t SL_SCOPE_SNAPSHOT = 0x10;  // bit 4 — for more 'ephemeral' or 'performance' settings that we want to be able to save/load but don't necessarily want to be part of the regular scene/project settings; not included in SL_SCOPE_ALL since it's a bit more optional and use-case-specific than the others, and we might want to exclude it from bulk save/load operations by default
 // bits 4..7 reserved for future levels
 static constexpr sl_scope_t SL_SCOPE_ALL     = 0xFF;  // default: slot belongs to every scope
 

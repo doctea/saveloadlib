@@ -300,3 +300,40 @@ public:
 
     virtual size_t heap_size() const override { return sizeof(SaveableNibbleArraySetting<T>); }
 };
+
+template<typename T>
+class SaveableByteArraySetting : public SaveableSettingBase {
+public:
+    T*       data;
+    uint16_t count;
+
+    SaveableByteArraySetting(const char* lbl, const char* cat,
+                               T* data_ptr, uint16_t n)
+        : data(data_ptr), count(n) {
+        set_label(lbl);
+        set_category(cat ? cat : "");
+    }
+
+    const char* get_line() override {
+        int pos = snprintf(linebuf, SL_MAX_LINE, "%s=", label);
+        for (uint16_t i = 0; i < count && pos < SL_MAX_LINE - 1; i++) {
+            int v = (int)data[i];
+            if (v < 0) v = 0;
+            if (v > 255) v = 255;
+            pos += snprintf(linebuf + pos, SL_MAX_LINE - pos, "%02x", v & 0xFF);
+        }
+        linebuf[pos] = '\0';
+        return linebuf;
+    }
+
+    bool parse_key_value(const char* key, const char* value) override {
+        if (strcmp(key, label) != 0) return false;
+        for (uint16_t i = 0; i < count && value[i*2] && value[i*2+1]; i++) {
+            char byte_str[3] = { value[i*2], value[i*2+1], '\0' };
+            data[i] = (T)strtol(byte_str, nullptr, 16);
+        }
+        return true;
+    }
+
+    virtual size_t heap_size() const override { return sizeof(SaveableByteArraySetting<T>); }
+};
