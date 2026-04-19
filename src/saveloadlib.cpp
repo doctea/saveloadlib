@@ -459,12 +459,18 @@ static bool sl_validate_tree_recursive(ISaveableSettingHost* host, Print& out, u
                " - any excess register_setting() calls were silently dropped\n",
                depth, seg, host->setting_count, host->max_settings);
     ok = false;
+  } else if (host->max_settings > host->setting_count) {
+    out.printf("SL_VALIDATE INFO [depth %u] '%s': only %u/%u settings registered - potentially %u unused slots wasting memory\n",
+               depth, seg, host->setting_count, host->max_settings, host->max_settings - host->setting_count);
   }
   if (host->max_children > 0 && host->child_count >= host->max_children) {
     out.printf("SL_VALIDATE WARNING [depth %u] '%s': children at capacity (%u/%u)"
                " - any excess register_child() calls were silently dropped\n",
                depth, seg, host->child_count, host->max_children);
     ok = false;
+  } else if (host->max_children > host->child_count) {
+    out.printf("SL_VALIDATE INFO [depth %u] '%s': only %u/%u children registered - potentially %u unused slots wasting memory\n",
+               depth, seg, host->child_count, host->max_children, host->max_children - host->child_count);
   }
   for (uint8_t i = 0; i < host->child_count; ++i)
     ok &= sl_validate_tree_recursive(host->children[i].host, out, depth + 1);
