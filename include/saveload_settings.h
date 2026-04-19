@@ -248,6 +248,85 @@ public:
   void set_save_enabled_fn(bool s)   { save_enabled = s; }
 };
 
+// -------------------- LSaveablePairSetting (two values serialised as "label=v1,v2") --------------------
+// Stores two related values atomically in a single key=value line.
+// The setter is called with both values together on load, so only one change
+// notification fires (useful for e.g. time signature numerator + denominator).
+//
+// Line format:  key=v1,v2
+//
+// Usage example (time signature):
+//   register_setting(new LSaveablePairSetting<uint8_t, uint8_t>(
+//       "time_sig", "Time Signature",
+//       [this](uint8_t num, uint8_t den) { set_time_signature({num, den}); },
+//       [this]() -> uint8_t { return get_numerator(); },
+//       [this]() -> uint8_t { return get_denominator(); }
+//   ), SL_SCOPE_PROJECT | SL_SCOPE_SCENE);
+template<typename T1, typename T2>
+class LSaveablePairSetting : public SaveableSettingBase {
+public:
+  using setter_func_t  = vl::Func<void(T1, T2)>;
+  using getter1_func_t = vl::Func<T1()>;
+  using getter2_func_t = vl::Func<T2()>;
+
+  setter_func_t  setter;
+  getter1_func_t getter1;
+  getter2_func_t getter2;
+  bool recall_enabled = true;
+
+  LSaveablePairSetting(
+    const char*    lbl,
+    const char*    category,
+    setter_func_t  setter_callable,
+    getter1_func_t getter1_callable,
+    getter2_func_t getter2_callable
+  ) {
+    set_label(lbl);
+    set_category(category);
+    setter  = setter_callable;
+    getter1 = getter1_callable;
+    getter2 = getter2_callable;
+  }
+
+  const char* get_line() override {
+    T1 v1{}; T2 v2{};
+    if (sl_callable_valid(getter1)) v1 = getter1();
+    if (sl_callable_valid(getter2)) v2 = getter2();
+    // Format each value using the empty-label trick: sl_format_to_buf with ""
+    // produces "=<value>", so skip the leading '=' to get just the value string.
+    char tmp1[32], tmp2[32];
+    sl_format_to_buf(tmp1, sizeof(tmp1), "", v1);
+    sl_format_to_buf(tmp2, sizeof(tmp2), "", v2);
+    snprintf(linebuf, SL_MAX_LINE, "%s=%s,%s", label, tmp1 + 1, tmp2 + 1);
+    return linebuf;
+  }
+
+  bool parse_key_value(const char* key, const char* value) override {
+    if (strcmp(key, label) != 0) return false;
+    if (!recall_enabled) return false;
+
+    // value is "v1,v2" — split on the first comma
+    const char* comma = strchr(value, ',');
+    if (!comma) return false;
+
+    char buf1[32];
+    size_t len1 = (size_t)(comma - value);
+    if (len1 >= sizeof(buf1)) len1 = sizeof(buf1) - 1;
+    memcpy(buf1, value, len1);
+    buf1[len1] = '\0';
+
+    T1 v1 = sl_parse_from_cstr<T1>(buf1);
+    T2 v2 = sl_parse_from_cstr<T2>(comma + 1);
+
+    if (sl_callable_valid(setter)) { setter(v1, v2); return true; }
+    return false;
+  }
+
+  virtual size_t heap_size() const override { return sizeof(LSaveablePairSetting<T1, T2>); }
+
+  void set_recall_enabled_fn(bool s) { recall_enabled = s; }
+};
+
 // -------------------- SaveableNibbleArraySetting (fixed-size packed nibble array) --------------------
 // Stores an array of small integer values as a compact nibble-encoded hex string.
 // Each element is encoded as a single hex character (nibble, values 0..15).
