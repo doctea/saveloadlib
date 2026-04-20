@@ -3,6 +3,10 @@
 #pragma once
 #include <Arduino.h>
 
+// Native test stubs may not provide a full Print type definition.
+// A forward declaration is enough for the Print& API declarations below.
+class Print;
+
 // Platform file systems
 #if defined(ENABLE_SD)
   #include <SD.h>

@@ -312,3 +312,52 @@ All three accept an optional `max_depth` argument (default 8).
 | `SL_MAX_LABEL` | Override max label length in bytes (48) |
 | `SL_MAX_LINE` | Override max serialised line length in bytes (256) |
 | `ENABLE_TESTSAVELOAD` | Enable test code and objects for save/load (not included in build by default) |
+
+---
+
+## Testing and Benchmarking
+
+### Run unit tests (correctness)
+
+From the library root:
+
+```bash
+./scripts/run_tests.sh
+```
+
+This runs the Unity test suite in `test/native/test_saveload.cpp` and verifies save/load behaviour, routing, nesting, and scope filtering.
+
+Direct PlatformIO equivalent:
+
+```bash
+pio test -e native -vv
+```
+
+### Run benchmarks (performance + memory)
+
+Use the wrapper script:
+
+```bash
+./scripts/run_bench.sh
+```
+
+This builds and runs `test/native/test_benchmark.cpp`, which reports:
+
+- Tier 1: instance sizes (memory footprint)
+- Tier 2: save/load throughput and hierarchy cost
+- Tier 3: stress runs (high-iteration scenarios)
+
+### Compare two benchmark runs
+
+```bash
+./scripts/run_bench.sh > bench_run_1.txt
+# make code changes
+./scripts/run_bench.sh > bench_run_2.txt
+diff bench_run_1.txt bench_run_2.txt
+```
+
+Recommended cadence:
+
+- Run unit tests on every functional change
+- Run benchmarks before and after optimisation work
+- Keep one baseline benchmark output per release/major refactor for regression checks
