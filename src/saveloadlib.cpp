@@ -10,6 +10,9 @@ ISaveableSettingHost* SL_ROOT = nullptr;  // single definition; extern-declared 
 
 SL_ArenaBase* sl_setting_arena = nullptr;  // global arena for SaveableSettingBase::operator new
 
+char     sl_seg_pool[SL_SEG_POOL_SIZE];    // intern pool for path_segment strings
+uint16_t sl_seg_pool_used = 0;
+
 // ---------------------------------------------------------------------------
 // Optional bulk file-read buffer
 // ---------------------------------------------------------------------------
@@ -263,13 +266,14 @@ void sl_setup_all(ISaveableSettingHost* root) {
   for (uint8_t i = 0; i < root->child_count; ++i) {
     ISaveableSettingHost* child = root->children[i].host;
     if (child) {
-      // Refresh seg/hash via virtual dispatch before recursing.
+      // Refresh seg_hash and path_segment field via virtual dispatch before recursing.
       // get_path_segment() may return a virtual value (e.g. get_label()) that wasn't
       // available at register_child() time; objects are fully constructed here so
-      // virtual dispatch is safe.
+      // virtual dispatch is safe.  We also intern the result so path_segment field
+      // stays in sync with the virtual getter.
       const char* seg = child->get_path_segment();
-      root->children[i].seg  = seg;
-      root->children[i].hash = sl_fnv1a_16(seg);
+      child->path_segment = sl_seg_intern(seg);
+      child->seg_hash = sl_fnv1a_16(child->path_segment);
       sl_setup_all(child);
     }
   }

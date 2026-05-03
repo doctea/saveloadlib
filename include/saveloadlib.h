@@ -163,12 +163,13 @@ struct SaveableSettingBase {
   // Points to arena memory, heap memory, or a string literal — see set_label() / set_label_static().
   const char* label = "";
   const char* category_name = "";  // always a string literal pointer
+  uint16_t label_hash = 0;         // FNV-1a 16-bit hash of label; kept in sync by set_label/set_label_static
 
   // Copy lbl into the arena (if active) or the heap.
   // Safe for temporaries, stack buffers, and dynamically-built strings.
   // Uses at most SL_MAX_LABEL-1 chars + NUL.
   void set_label(const char* lbl) {
-    if (!lbl || !*lbl) { label = ""; return; }
+    if (!lbl || !*lbl) { label = ""; label_hash = 0; return; }
     size_t n = strlen(lbl);
     if (n >= SL_MAX_LABEL) n = SL_MAX_LABEL - 1;
     // Allocate n+1 bytes: from arena if available (fast, no heap scan), else heap.
@@ -178,6 +179,7 @@ struct SaveableSettingBase {
               : (char*)::operator new(n + 1);
     if (buf) { memcpy(buf, lbl, n); buf[n] = '\0'; label = buf; }
     else       label = lbl;  // fallback: borrow pointer (unsafe, but better than crashing)
+    label_hash = sl_fnv1a_16(label);
   }
 
   // Store pointer directly — NO copy, zero allocation.
@@ -185,6 +187,7 @@ struct SaveableSettingBase {
   // (e.g. a member array, a global, or a pointer whose lifetime exceeds the setting).
   void set_label_static(const char* lbl) {
     label = lbl ? lbl : "";
+    label_hash = sl_fnv1a_16(label);
   }
 
   void set_category(const char* cat) {
@@ -219,15 +222,50 @@ struct SaveableSettingBase {
 // Print callback signature for each setting line (declared here so ISaveableSettingHost can use it)
 using SL_PrintCallback = void(*)(const char* line, void* user_ctx);
 
+// ---------------------------------------------------------------------------
+// Segment-string intern pool — shared storage for all path_segment strings.
+// Replaces the per-node path_segment_buf[32] inline buffer.  Duplicate strings
+// (e.g. "EuclidianPattern" used by 25 nodes) occupy pool space only once.
+// ---------------------------------------------------------------------------
+#ifndef SL_SEG_POOL_SIZE
+#define SL_SEG_POOL_SIZE 512
+#endif
+
+extern char     sl_seg_pool[];
+extern uint16_t sl_seg_pool_used;
+
+// Intern a segment string. Returns pointer into pool; deduplicates identical
+// strings. Returns "" for null/empty. On overflow, returns input pointer
+// unchanged (safe for literals; prints a warning).
+static inline const char* sl_seg_intern(const char* seg) {
+    if (!seg || !seg[0]) return "";
+    const char* p       = sl_seg_pool;
+    const char* pool_end = sl_seg_pool + sl_seg_pool_used;
+    while (p < pool_end) {
+        if (strcmp(p, seg) == 0) return p;
+        p += strlen(p) + 1;
+    }
+    size_t n = strlen(seg);
+    if (n >= 32) n = 31;  // matches PATH_SEG_MAX - 1
+    if ((size_t)(sl_seg_pool_used + n + 1) > SL_SEG_POOL_SIZE) {
+        if (Serial) Serial.println(F("SL_WARNING: sl_seg_pool full, path segment not interned"));
+        return seg;
+    }
+    char* dst = sl_seg_pool + sl_seg_pool_used;
+    memcpy(dst, seg, n);
+    dst[n] = '\0';
+    sl_seg_pool_used = (uint16_t)(sl_seg_pool_used + n + 1);
+    return dst;
+}
+
 struct ISaveableSettingHost {
   const char* path_segment = "";
-  static constexpr size_t PATH_SEG_MAX = 32;
-  char path_segment_buf[PATH_SEG_MAX] = {};
+  static constexpr size_t PATH_SEG_MAX = 32;  // kept for set_path_segment_fmt local buffer
   uint16_t seg_hash = 0;
 
-  struct ChildEntry   { ISaveableSettingHost* host; const char* seg; uint16_t hash; };
+  struct ChildEntry   { ISaveableSettingHost* host; };
   // mask: bitmask of SL_SCOPE_* values — which save/load scopes this slot participates in.
-  struct SettingEntry { SaveableSettingBase* setting; const char* key; uint16_t hash; sl_scope_t mask; };
+  struct SettingEntry { SaveableSettingBase* setting; sl_scope_t mask; };
 
   // Arrays injected by SHStorage<NCH,NSET> — NOT owned by this base; never nullptr after construction
   ChildEntry*   children    = nullptr;
@@ -238,15 +276,12 @@ struct ISaveableSettingHost {
   uint8_t setting_count     = 0;
 
   virtual void set_path_segment(const char* seg) {
-    if (!seg) { 
-      path_segment_buf[0] = '\0'; 
-      this->path_segment = path_segment_buf; 
-      return; 
+    if (!seg) {
+      this->path_segment = "";
+      this->seg_hash = 0;
+      return;
     }
-    strncpy(path_segment_buf, seg, PATH_SEG_MAX - 1);
-    path_segment_buf[PATH_SEG_MAX - 1] = '\0';
-    this->path_segment = path_segment_buf;
-    // Warn if an empty segment is set, which would cause all children to be at the same path and thus collide.
+    this->path_segment = sl_seg_intern(seg);
     if (this->path_segment[0] == '\0') {
       if (Serial) Serial.println(F("SL_WARNING: setting empty path segment for a saveable settings host may cause collisions between its children"));
     }
@@ -269,10 +304,8 @@ struct ISaveableSettingHost {
   }
 
   virtual void register_child(ISaveableSettingHost* child) {
-    if (child_count < max_children && child && child->path_segment) {
+    if (child_count < max_children && child) {
       children[child_count].host = child;
-      children[child_count].seg = child->path_segment;
-      children[child_count].hash = sl_fnv1a_16(child->path_segment);
       child_count++;
     } else if (child_count >= max_children) {
       if (Serial) Serial.printf("SL_WARNING: failed to register_child with path segment '%s' in host '%s' - max children of %i reached\n", child ? child->path_segment : "null", this->path_segment, max_children);
@@ -294,8 +327,6 @@ struct ISaveableSettingHost {
 
     if (setting_count < max_settings) {
       settings[setting_count].setting = setting;
-      settings[setting_count].key     = setting->label;
-      settings[setting_count].hash    = sl_fnv1a_16(setting->label);
       settings[setting_count].mask    = mask;
       ++setting_count;
       return true;
@@ -317,7 +348,7 @@ struct ISaveableSettingHost {
     if (!label) return -1;
     uint16_t h = sl_fnv1a_16(label);
     for (int i = 0; i < (int)setting_count; ++i) {
-      if (settings[i].hash == h && strcmp(settings[i].key, label) == 0) return i;
+      if (settings[i].setting->label_hash == h && strcmp(settings[i].setting->label, label) == 0) return i;
     }
     return -1;
   }
@@ -331,8 +362,6 @@ struct ISaveableSettingHost {
     int idx = find_setting_index(label);
     if (idx >= 0) {
       settings[idx].setting = newSetting;
-      settings[idx].key     = newSetting->label;
-      settings[idx].hash    = sl_fnv1a_16(newSetting->label);
       // mask not changed: belongs to the slot, not the object
       return true;
     }
@@ -362,32 +391,28 @@ struct ISaveableSettingHost {
   // Save recursion.
   // scope defaults to SL_SCOPE_ALL so the full tree is written when no scope is specified.
   virtual void save_recursive(char* prefix, size_t prefix_len, void (*output_cb)(const char*), sl_scope_t scope = SL_SCOPE_ALL) {
-    // Serial.printf("save_recursive in host '%s' with scope mask 0x%02X (setting count %i, host count %i)\n", this->path_segment, scope, setting_count, child_count);
     static char out[SL_MAX_LINE];  // safe static: written then immediately consumed before recursion
     for (uint8_t i = 0; i < setting_count; ++i) {
-      // Serial.printf("Working with setting '%s' of host '%s' with scope mask 0x%02X (save scope 0x%02X)\n", settings[i].key, this->path_segment, settings[i].mask, scope);
       if (!(settings[i].mask & scope)) {
-        // Serial.printf("Skipping setting '%s' for host '%s' due to scope mismatch (slot mask 0x%02X, save scope 0x%02X)\n", settings[i].key, this->path_segment, settings[i].mask, scope);
         continue;  // not in the requested scope
       }
       const char* kv = settings[i].setting->get_line();
       const char* val = strchr(kv, '=') ? strchr(kv, '=') + 1 : kv;
       if (prefix_len == 0) {
-        snprintf(out, SL_MAX_LINE, "%s=%s", settings[i].key, val);
+        snprintf(out, SL_MAX_LINE, "%s=%s", settings[i].setting->label, val);
       } else {
-        snprintf(out, SL_MAX_LINE, "%s~%s=%s", prefix, settings[i].key, val);
+        snprintf(out, SL_MAX_LINE, "%s~%s=%s", prefix, settings[i].setting->label, val);
       }
       output_cb(out);
     }
     for (uint8_t c = 0; c < child_count; ++c) {
-      // Serial.printf("Child [%i/%i] of host '%s': segment '%s' (hash 0x%04X)\n", c + 1, child_count, this->path_segment, children[c].seg, children[c].hash);
-      if (!children[c].host || !children[c].seg) {
-        // Serial.printf("\tSkipping child [%i/%i] of host '%s' due to missing host or segment\n", c + 1, child_count, this->path_segment);
+      if (!children[c].host) {
         continue;
       }
+      const char* cseg = children[c].host->get_path_segment();
       char newpref[SL_MAX_LABEL * 4];  // fits max nesting depth with short segment names
-      if (prefix_len == 0) snprintf(newpref, sizeof(newpref), "%s", children[c].seg);
-      else snprintf(newpref, sizeof(newpref), "%s~%s", prefix, children[c].seg);
+      if (prefix_len == 0) snprintf(newpref, sizeof(newpref), "%s", cseg);
+      else snprintf(newpref, sizeof(newpref), "%s~%s", prefix, cseg);
       children[c].host->save_recursive(newpref, strlen(newpref), output_cb, scope);
     }
   }
@@ -401,17 +426,18 @@ struct ISaveableSettingHost {
       const char* kv = settings[i].setting->get_line();
       const char* val = strchr(kv, '=') ? strchr(kv, '=') + 1 : kv;
       if (prefix_len == 0) {
-        snprintf(out, SL_MAX_LINE, "%s=%s", settings[i].key, val);
+        snprintf(out, SL_MAX_LINE, "%s=%s", settings[i].setting->label, val);
       } else {
-        snprintf(out, SL_MAX_LINE, "%s~%s=%s", prefix, settings[i].key, val);
+        snprintf(out, SL_MAX_LINE, "%s~%s=%s", prefix, settings[i].setting->label, val);
       }
       output_cb(out, ctx);
     }
     for (uint8_t c = 0; c < child_count; ++c) {
-      if (!children[c].host || !children[c].seg) continue;
+      if (!children[c].host) continue;
+      const char* cseg = children[c].host->get_path_segment();
       char newpref[SL_MAX_LABEL * 4];
-      if (prefix_len == 0) snprintf(newpref, sizeof(newpref), "%s", children[c].seg);
-      else snprintf(newpref, sizeof(newpref), "%s~%s", prefix, children[c].seg);
+      if (prefix_len == 0) snprintf(newpref, sizeof(newpref), "%s", cseg);
+      else snprintf(newpref, sizeof(newpref), "%s~%s", prefix, cseg);
       children[c].host->save_recursive(newpref, strlen(newpref), output_cb, ctx, scope);
     }
   }
@@ -425,7 +451,7 @@ struct ISaveableSettingHost {
       const char* key = segments[0];
       uint16_t h = sl_fnv1a_16(key);
       for (uint8_t i = 0; i < setting_count; ++i) {
-        if (settings[i].hash == h && strcmp(settings[i].key, key) == 0) {
+        if (settings[i].setting->label_hash == h && strcmp(settings[i].setting->label, key) == 0) {
           if (!(settings[i].mask & scope)) return false;  // scope mismatch: do not apply
           return settings[i].setting->parse_key_value(key, value);
         }
@@ -435,7 +461,7 @@ struct ISaveableSettingHost {
     const char* seg0 = segments[0];
     uint16_t h0 = sl_fnv1a_16(seg0);
     for (uint8_t c = 0; c < child_count; ++c) {
-      if (children[c].hash == h0 && strcmp(children[c].seg, seg0) == 0) {
+      if (children[c].host->seg_hash == h0 && strcmp(children[c].host->get_path_segment(), seg0) == 0) {
         return children[c].host->load_line(segments + 1, seg_count - 1, value, scope);
       }
     }
@@ -522,12 +548,18 @@ struct SHDynamicBase : virtual public ISaveableSettingHost {
     settings = nullptr;
   }
 
+  int freeRam () {  
+    #ifdef ARDUINO_ARCH_RP2040
+      return rp2040.getFreeHeap();
+    #endif
+  }
+
   void register_child(ISaveableSettingHost* child) override {
-    if (!child || !child->path_segment) return;
+    if (!child) return;
+    Serial.printf("At top of register_child() for child with segment '%s' in host '%s' (child count %i, max %i), free ram is %u\n", child->path_segment, this->path_segment, child_count, max_children, freeRam());  
     if (child_count >= max_children) _grow_children();
     children[child_count].host = child;
-    children[child_count].seg  = child->path_segment;
-    children[child_count].hash = sl_fnv1a_16(child->path_segment);
+    Serial.printf("At end of register_child() for child with segment '%s' in host '%s' (child count %i, max %i), free ram is %u\n", child->path_segment, this->path_segment, child_count, max_children, freeRam());  
     child_count++;
   }
 
@@ -536,11 +568,11 @@ struct SHDynamicBase : virtual public ISaveableSettingHost {
     if (allow_replace) {
       if (replace_setting_by_label(setting->label, setting)) return true;
     }
+    Serial.printf("At top of register_setting() for setting with label '%s' in host '%s' (setting count %i, max %i), free ram is %u\n", setting->label, this->path_segment, setting_count, max_settings, freeRam());  
     if (setting_count >= max_settings) _grow_settings();
     settings[setting_count].setting = setting;
-    settings[setting_count].key     = setting->label;
-    settings[setting_count].hash    = sl_fnv1a_16(setting->label);
     settings[setting_count].mask    = mask;
+    Serial.printf("At end of register_setting() for setting with label '%s' in host '%s' (setting count %i, max %i), free ram is %u\n", setting->label, this->path_segment, setting_count, max_settings, freeRam());  
     ++setting_count;
     return true;
   }

@@ -49,8 +49,8 @@ public:
 
     virtual void setup_saveable_settings() override {
         ISaveableSettingHost::setup_saveable_settings();
-        register_setting(new LSaveableSetting<float>("volume", "MyThing", &this->volume));
-        register_setting(new LSaveableSetting<bool> ("muted",  "MyThing", &this->muted));
+        register_setting(new VarSetting<float>("volume", "MyThing", &this->volume));
+        register_setting(new VarSetting<bool> ("muted",  "MyThing", &this->muted));
     }
 };
 ```
@@ -91,7 +91,7 @@ An optional `scope` argument controls which settings are visited (see [Save Scop
 
 ```cpp
 // Simplest — pointer to member variable
-register_setting(new LSaveableSetting<float>("density", "MyClass", &this->density));
+register_setting(new VarSetting<float>("density", "MyClass", &this->density));
 
 // With custom getter and setter lambdas
 register_setting(new LSaveableSetting<int>(

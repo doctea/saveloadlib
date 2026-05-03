@@ -1,0 +1,63 @@
+[bench] Building benchmark binary...
+[bench] Running benchmark...
+
+╔════════════════════════════════════════════════════════════╗
+║ saveloadlib BENCHMARKS                                     ║
+╚════════════════════════════════════════════════════════════╝
+
+╔════════════════════════════════════════════════════════════╗
+║ TIER 1: MEMORY - Instance Sizes                            ║
+╚════════════════════════════════════════════════════════════╝
+BENCH: SingleIntHost            =  80 bytes
+BENCH: MultiSettingHost (5 settings) = 152 bytes
+BENCH: GridHost (3 settings)    = 112 bytes
+BENCH: DeepLeafHost (2 settings) =  96 bytes
+BENCH: DeepMidHost (with leaf)  = 112 bytes
+BENCH: DeepRootHost (with mid)  =  88 bytes
+
+╔════════════════════════════════════════════════════════════╗
+║ TIER 2: PERFORMANCE - Save Operations                      ║
+╚════════════════════════════════════════════════════════════╝
+BENCH: Save 1 setting x10000:    0.643 ms (0.06 us/op, 15552.1 ops/ms)
+BENCH: Save 5 settings x5000:   3.054 ms (0.61 us/op, 1637.2 ops/ms)
+
+╔════════════════════════════════════════════════════════════╗
+║ TIER 2: PERFORMANCE - Load Operations                      ║
+╚════════════════════════════════════════════════════════════╝
+BENCH: Load 1 setting x10000:   0.228 ms (0.02 us/op, 43859.6 ops/ms)
+
+╔════════════════════════════════════════════════════════════╗
+║ TIER 2: PERFORMANCE - Hierarchy Operations                 ║
+╚════════════════════════════════════════════════════════════╝
+BENCH: Save 2-level hierarchy (3 settings) x5000:  1.286 ms (0.26 us/op)
+       Lines generated per op: 3
+BENCH: Save 3-level hierarchy (4 settings) x5000:  1.507 ms (0.30 us/op)
+       Lines generated per op: 3
+
+╔════════════════════════════════════════════════════════════╗
+║ TIER 3: STRESS - High Iteration Load                       ║
+╚════════════════════════════════════════════════════════════╝
+BENCH: Save + modify x50000:    20 ms (0.40 us/op, 2500000 ops/s)
+BENCH: Save with scope filter x50000: 20 ms (0.40 us/op)
+
+╔════════════════════════════════════════════════════════════╗
+║ BENCHMARK SUMMARY & USAGE RECOMMENDATIONS                  ║
+╚════════════════════════════════════════════════════════════╝
+
+Run benchmarks regularly to:
+  1. Establish baseline performance (current commit)
+  2. Compare before/after optimization changes
+  3. Detect performance regressions
+  4. Track memory growth as features are added
+
+How to compare runs:
+  - Save output to file: ./scripts/run_bench.sh > bench_run_1.txt
+  - Make changes to saveloadlib
+  - Run again:              ./scripts/run_bench.sh > bench_run_2.txt
+  - Diff:                   diff bench_run_1.txt bench_run_2.txt
+
+Tier usage:
+  - TIER 1 (Memory):     Run every commit - catches size regressions
+  - TIER 2 (Perf):       Run before/after optimizations
+  - TIER 3 (Stress):     Run when investigating edge cases
+

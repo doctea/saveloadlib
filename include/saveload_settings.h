@@ -119,12 +119,9 @@ public:
   DataType (TargetClass::*getter_func)() = nullptr;
 
   bool (TargetClass::*is_recall_enabled_func)() = nullptr;
-  bool (TargetClass::*is_save_enabled_func)() = nullptr;
   void (TargetClass::*set_recall_enabled_func)(bool) = nullptr;
-  void (TargetClass::*set_save_enabled_func)(bool) = nullptr;
 
   bool recall_enabled = true;
-  bool save_enabled = true;
 
   SaveableSetting(
     const char* lbl,
@@ -136,9 +133,7 @@ public:
     void (TargetClass::*setter)(DataType) = nullptr,
     DataType (TargetClass::*getter)() = nullptr,
     bool (TargetClass::*is_recall_enabled)() = nullptr,
-    bool (TargetClass::*is_save_enabled)() = nullptr,
-    void (TargetClass::*set_recall_enabled)(bool) = nullptr,
-    void (TargetClass::*set_save_enabled)(bool) = nullptr
+    void (TargetClass::*set_recall_enabled)(bool) = nullptr
   ) {
     set_label(lbl);
     set_category(category);
@@ -147,12 +142,9 @@ public:
     setter_func = setter;
     getter_func = getter;
     is_recall_enabled_func = is_recall_enabled;
-    is_save_enabled_func = is_save_enabled;
     set_recall_enabled_func = set_recall_enabled;
-    set_save_enabled_func = set_save_enabled;
 
     if (variable_recall_enabled != nullptr) recall_enabled = *variable_recall_enabled;
-    if (variable_save_enabled != nullptr) save_enabled = *variable_save_enabled;
   }
 
   const char* get_line() override {
@@ -188,10 +180,6 @@ public:
     if (set_recall_enabled_func && target) (target->*set_recall_enabled_func)(s);
     else recall_enabled = s;
   }
-  void set_save_enabled(bool s) {
-    if (set_save_enabled_func && target) (target->*set_save_enabled_func)(s);
-    else save_enabled = s;
-  }
 };
 
 // -------------------- LSaveableSetting (callable-based, uses vl::Func) --------------------
@@ -206,7 +194,6 @@ public:
 
   DataType* variable = nullptr;
   bool recall_enabled = true;
-  bool save_enabled = true;
 
   LSaveableSetting(
     const char* lbl,
@@ -245,7 +232,42 @@ public:
   virtual size_t heap_size() const override { return sizeof(LSaveableSetting<DataType>); }
 
   void set_recall_enabled_fn(bool s) { recall_enabled = s; }
-  void set_save_enabled_fn(bool s)   { save_enabled = s; }
+};
+
+// -------------------- VarSetting (variable-only, no functors — minimal struct) --------------------
+// Use this instead of LSaveableSetting<T> when you only have a variable pointer and no
+// setter/getter lambdas.  Saves ~32 bytes per instance by omitting two vl::Func members.
+//
+// Usage:  register_setting(new VarSetting<float>("density", "MyClass", &this->density));
+template<typename DataType>
+class VarSetting : public SaveableSettingBase {
+public:
+  DataType* variable = nullptr;
+  bool recall_enabled = true;
+
+  VarSetting(const char* lbl, const char* category, DataType* var) {
+    set_label(lbl);
+    set_category(category);
+    variable = var;
+  }
+
+  const char* get_line() override {
+    DataType v{};
+    if (variable) v = *variable;
+    sl_format_to_buf(linebuf, sizeof(linebuf), label, v);
+    return linebuf;
+  }
+
+  bool parse_key_value(const char* key, const char* value) override {
+    if (strcmp(key, label) != 0) return false;
+    if (!recall_enabled) return false;
+    if (variable) { *variable = sl_parse_from_cstr<DataType>(value); return true; }
+    return false;
+  }
+
+  virtual size_t heap_size() const override { return sizeof(VarSetting<DataType>); }
+
+  void set_recall_enabled_fn(bool s) { recall_enabled = s; }
 };
 
 // -------------------- LSaveablePairSetting (two values serialised as "label=v1,v2") --------------------
