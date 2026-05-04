@@ -228,7 +228,7 @@ using SL_PrintCallback = void(*)(const char* line, void* user_ctx);
 // (e.g. "EuclidianPattern" used by 25 nodes) occupy pool space only once.
 // ---------------------------------------------------------------------------
 #ifndef SL_SEG_POOL_SIZE
-#define SL_SEG_POOL_SIZE 512
+#define SL_SEG_POOL_SIZE 4096
 #endif
 
 extern char     sl_seg_pool[];
@@ -548,18 +548,10 @@ struct SHDynamicBase : virtual public ISaveableSettingHost {
     settings = nullptr;
   }
 
-  int freeRam () {  
-    #ifdef ARDUINO_ARCH_RP2040
-      return rp2040.getFreeHeap();
-    #endif
-  }
-
   void register_child(ISaveableSettingHost* child) override {
     if (!child) return;
-    Serial.printf("At top of register_child() for child with segment '%s' in host '%s' (child count %i, max %i), free ram is %u\n", child->path_segment, this->path_segment, child_count, max_children, freeRam());  
     if (child_count >= max_children) _grow_children();
     children[child_count].host = child;
-    Serial.printf("At end of register_child() for child with segment '%s' in host '%s' (child count %i, max %i), free ram is %u\n", child->path_segment, this->path_segment, child_count, max_children, freeRam());  
     child_count++;
   }
 
@@ -568,11 +560,9 @@ struct SHDynamicBase : virtual public ISaveableSettingHost {
     if (allow_replace) {
       if (replace_setting_by_label(setting->label, setting)) return true;
     }
-    Serial.printf("At top of register_setting() for setting with label '%s' in host '%s' (setting count %i, max %i), free ram is %u\n", setting->label, this->path_segment, setting_count, max_settings, freeRam());  
     if (setting_count >= max_settings) _grow_settings();
     settings[setting_count].setting = setting;
     settings[setting_count].mask    = mask;
-    Serial.printf("At end of register_setting() for setting with label '%s' in host '%s' (setting count %i, max %i), free ram is %u\n", setting->label, this->path_segment, setting_count, max_settings, freeRam());  
     ++setting_count;
     return true;
   }
