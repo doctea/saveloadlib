@@ -378,6 +378,12 @@ struct ISaveableSettingHost {
   // Default: no-op.
   virtual void print_dynamic_entries(const char* /*prefix*/, SL_PrintCallback /*cb*/, void* /*ctx*/, sl_scope_t /*scope*/) {}
 
+  // Called by sl_notify_after_load() on every host in the tree after a load completes.
+  // Override to re-apply any derived state that depends on loaded settings
+  // (e.g. re-applying a per-section time signature after the arranger settings are restored).
+  // Default: no-op.
+  virtual void on_after_load() {}
+
   bool remove_setting_by_label(const char* label) {
     int idx = find_setting_index(label);
     if (idx < 0) return false;
@@ -688,6 +694,12 @@ static void sl_compute_hashes_recursive(ISaveableSettingHost* host) {
 // Walk the tree and call setup_saveable_settings on each host.
 // The order is parent first, then children, matching the inheritance pattern.
 void sl_setup_all(ISaveableSettingHost* root);
+
+// Walk the tree and call on_after_load() on every host.
+// Called automatically by sl_load_from_file() and sl_load_from_linkedlist().
+// May also be called manually after any direct settings mutation that needs
+// the same post-load derived-state update.
+void sl_notify_after_load(ISaveableSettingHost* root);
 
 static inline void sl_register_and_setup_root(ISaveableSettingHost* r) {
   sl_register_root(r);

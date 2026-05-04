@@ -159,6 +159,7 @@ bool sl_load_from_file(const char* path, sl_scope_t scope) {
         }
         p = nl ? nl + 1 : end;
       }
+      if (SL_ROOT) sl_notify_after_load(SL_ROOT);
       return true;
     }
     // File too large for buffer — fall through to streaming path.
@@ -173,6 +174,7 @@ bool sl_load_from_file(const char* path, sl_scope_t scope) {
     sl_parse_line_buffer(linebuf, scope);
   }
   f.close();
+  if (SL_ROOT) sl_notify_after_load(SL_ROOT);
   return true;
 }
 
@@ -184,6 +186,7 @@ bool sl_load_from_linkedlist(const char* path, const LinkedList<String>& lines, 
     line.toCharArray(linebuf, sizeof(linebuf));
     sl_parse_line_buffer(linebuf, scope);
   }
+  if (SL_ROOT) sl_notify_after_load(SL_ROOT);
   return true;
 }
 
@@ -245,6 +248,15 @@ bool sl_load_all_scopes(const SL_ScopeTarget* targets, uint8_t count) {
   for (uint8_t i = 0; i < count; ++i)
     ok &= sl_load_from_file(targets[i].path, targets[i].scope);
   return ok;
+}
+
+void sl_notify_after_load(ISaveableSettingHost* root) {
+  if (!root) return;
+  root->on_after_load();
+  for (uint8_t i = 0; i < root->child_count; ++i) {
+    if (root->children[i].host)
+      sl_notify_after_load(root->children[i].host);
+  }
 }
 
 void sl_setup_all(ISaveableSettingHost* root) {
