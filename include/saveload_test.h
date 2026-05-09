@@ -56,8 +56,8 @@ class TestSaveableObject : public SHStorage<0, 4> {  // 4 settings; no children
 
         // print the stored lines for verification
         Serial.println("Captured settings lines:");
-        for (int i = 0; i < lines.size(); i++) {
-            Serial.println(lines.get(i));
+        for (auto& line : lines) {
+            Serial.println(line);
         }
 
         // randomise the settings to different values to make sure the load actually changes them back
@@ -72,8 +72,7 @@ class TestSaveableObject : public SHStorage<0, 4> {  // 4 settings; no children
 
         // also change the parameters values, modulation, and ranges
         LinkedList<FloatParameter*> *params = this->get_parameters();
-        for (int i = 0; i < params->size(); i++) {
-            FloatParameter* p = params->get(i);
+        for (auto* p : *params) {
             for (int i = 0 ; i < 3 ; i++) { // todo: find the correct define to use for number of modulation slots
                 p->connect_input(parameter_manager->getInputForIndex(random(0, parameter_manager->available_inputs->size())), random(0.0, 1.0));  // connect slot 0 to the first parameter input for testing
             }
@@ -92,8 +91,8 @@ class TestSaveableObject : public SHStorage<0, 4> {  // 4 settings; no children
             1 // max depth 1 to just get settings, no children (this object has no children anyway)
         );
         // print the new captured lines for verification        Serial.println("Captured settings lines after load:");
-        for (int i = 0; i < lines_after_load.size(); i++) {
-            Serial.println(lines_after_load.get(i));
+        for (auto& line : lines_after_load) {
+            Serial.println(line);
         }
         // compare the two lists        
         bool match = true;
@@ -101,9 +100,11 @@ class TestSaveableObject : public SHStorage<0, 4> {  // 4 settings; no children
             Serial.println("Mismatch in number of lines before save and after load!");
             match = false;
         } else {
-            for (int i = 0; i < lines.size(); i++) {
-                if (lines.get(i) != lines_after_load.get(i)) {
-                    Serial.printf("Mismatch in line %d: before '%s' vs after '%s'\n", i, lines.get(i).c_str(), lines_after_load.get(i).c_str());
+            int i = 0;
+            auto it_a = lines.begin(), it_b = lines_after_load.begin();
+            for (; it_a != lines.end() && it_b != lines_after_load.end(); ++it_a, ++it_b, ++i) {
+                if (*it_a != *it_b) {
+                    Serial.printf("Mismatch in line %d: before '%s' vs after '%s'\n", i, (*it_a).c_str(), (*it_b).c_str());
                     match = false;
                 }
             }
@@ -152,8 +153,8 @@ class TestSaveableObject : public SHStorage<0, 4> {  // 4 settings; no children
         this->register_setting(new LSaveableSetting<bool>("direct_bool_value", "Direct Bool Value", &this->direct_bool_value));
 
         LinkedList<FloatParameter*> *parameters = this->get_parameters();
-        for (int i = 0; i < parameters->size(); i++) {
-            this->register_child(parameters->get(i));
+        for (auto* param : *parameters) {
+            this->register_child(param);
         }
     }
 
