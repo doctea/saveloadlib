@@ -181,7 +181,7 @@ bool sl_load_from_file(const char* path, sl_scope_t scope) {
 // LinkedList<String> loader (for testing with in-memory data, or from other sources like Serial)
 bool sl_load_from_linkedlist(const char* path, const LinkedList<String>& lines, sl_scope_t scope) {
   char linebuf[SL_MAX_LINE];
-  for (int i = 0; i < lines.size(); i++) {
+  for (size_t i = 0; i < lines.size(); i++) {
     String line = lines.get(i);
     line.toCharArray(linebuf, sizeof(linebuf));
     sl_parse_line_buffer(linebuf, scope);
