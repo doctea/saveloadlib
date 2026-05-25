@@ -136,6 +136,7 @@ struct SL_ArenaBase {
 
     size_t bytes_used() const { return used; }
     size_t bytes_free() const { return capacity > used ? capacity - used : 0; }
+    size_t bytes_capacity() const { return capacity; }
 };
 
 // ---------------------------------------------------------------------------

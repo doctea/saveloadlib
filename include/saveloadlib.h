@@ -178,7 +178,14 @@ struct SaveableSettingBase {
               ? (char*)sl_setting_arena->allocate(n + 1, 1u)
               : (char*)::operator new(n + 1);
     if (buf) { memcpy(buf, lbl, n); buf[n] = '\0'; label = buf; }
-    else       label = lbl;  // fallback: borrow pointer (unsafe, but better than crashing)
+    else {
+      // Arena (or heap) is full — borrow the incoming pointer as a last resort.
+      // This is unsafe if lbl is a temporary, but avoids a crash.
+      if (sl_setting_arena && Serial)
+        Serial.printf("SL_Arena: full, falling back to borrowed pointer for label '%s' (%u bytes)\n",
+                      lbl, (unsigned)(n + 1));
+      label = lbl;
+    }
     label_hash = sl_fnv1a_16(label);
   }
 

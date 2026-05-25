@@ -283,6 +283,7 @@ void sl_setup_all(ISaveableSettingHost* root) {
       // available at register_child() time; objects are fully constructed here so
       // virtual dispatch is safe.  We also intern the result so path_segment field
       // stays in sync with the virtual getter.
+      //Serial.printf("sl_setup_all setting up child %u of '%s' with path segment '%s', has free ram %u...\n", (unsigned)i, root->path_segment ? root->path_segment : "root", child->get_path_segment(), rp2040.getFreeHeap());
       const char* seg = child->get_path_segment();
       child->path_segment = sl_seg_intern(seg);
       child->seg_hash = sl_fnv1a_16(child->path_segment);
@@ -490,11 +491,25 @@ static bool sl_validate_tree_recursive(ISaveableSettingHost* host, Print& out, u
   }
   for (uint8_t i = 0; i < host->child_count; ++i)
     ok &= sl_validate_tree_recursive(host->children[i].host, out, depth + 1);
+
+  //out.printf("SL_VALIDATE INFO [depth %u] '%s': %u settings, %u children using %u RAM\n", depth, seg, host->setting_count, host->child_count, (uint32_t)sizeof(ISaveableSettingHost) + (uint32_t)host->max_settings * sizeof(ISaveableSettingHost::SettingEntry) + (uint32_t)host->max_children * sizeof(ISaveableSettingHost::ChildEntry));
   return ok;
 }
 
 bool sl_validate_tree(ISaveableSettingHost* root, Print& out) {
   if (!root) { out.println(F("SL_VALIDATE: root is null")); return false; }
+  if (sl_setting_arena) {
+    size_t used = sl_setting_arena->bytes_used();
+    size_t cap  = sl_setting_arena->capacity;
+    out.printf("SL_VALIDATE: Arena usage: %u / %u bytes (%.1f%%)\n",
+               (unsigned)used, (unsigned)cap, cap ? 100.0f * used / cap : 0.0f);
+    if (used >= cap)
+      out.printf("SL_VALIDATE WARNING: Arena EXHAUSTED (%u/%u) - settings may have fallen back to heap or borrowed pointers!\n",
+                 (unsigned)used, (unsigned)cap);
+    else if (used * 10 >= cap * 9)
+      out.printf("SL_VALIDATE WARNING: Arena >90%% full (%u/%u) - consider increasing arena size\n",
+                 (unsigned)used, (unsigned)cap);
+  }
   bool ok = sl_validate_tree_recursive(root, out, 0);
   if (ok) out.println(F("SL_VALIDATE: tree OK - no nodes at capacity or missing path segments!"));
   return ok;
