@@ -71,7 +71,7 @@ class TestSaveableObject : public SHStorage<0, 4> {  // 4 settings; no children
         this->direct_bool_value = !this->direct_bool_value;
 
         // also change the parameters values, modulation, and ranges
-        LinkedList<FloatParameter*> *params = this->get_parameters();
+        ParameterList *params = this->get_parameters();
         for (auto* p : *params) {
             for (int i = 0 ; i < 3 ; i++) { // todo: find the correct define to use for number of modulation slots
                 p->connect_input(parameter_manager->getInputForIndex(random(0, parameter_manager->available_inputs->size())), random(0.0, 1.0));  // connect slot 0 to the first parameter input for testing
@@ -116,16 +116,16 @@ class TestSaveableObject : public SHStorage<0, 4> {  // 4 settings; no children
         }
     };
 
-    LinkedList<FloatParameter*> *parameters = nullptr;
+    ParameterList *parameters = nullptr;
 
     TestSaveableObject() {
         Serial.println("Constructing TestSaveableObject");
         this->set_path_segment("TestObject");
     }
 
-    LinkedList<FloatParameter*> *get_parameters() {
+    ParameterList *get_parameters() {
         if (!parameters) {
-            parameters = new LinkedList<FloatParameter*>();
+            parameters = new ParameterList();
             parameters->add(new LDataParameter<int>("int_value", [=](int v) { this->int_value = v; }, [=]() -> int { return this->int_value; }));
             parameters->add(new LDataParameter<float>("float_value", [=](float v) { this->float_value = v; }, [=]() -> float { return this->float_value; }));
             parameters->add(new LDataParameter<bool>("bool_value", [=](bool v) { this->bool_value = v; }, [=]() -> bool { return this->bool_value; }));
@@ -152,7 +152,7 @@ class TestSaveableObject : public SHStorage<0, 4> {  // 4 settings; no children
         this->register_setting(new LSaveableSetting<float>("direct_float_value", "Direct Float Value", &this->direct_float_value));
         this->register_setting(new LSaveableSetting<bool>("direct_bool_value", "Direct Bool Value", &this->direct_bool_value));
 
-        LinkedList<FloatParameter*> *parameters = this->get_parameters();
+        ParameterList *parameters = this->get_parameters();
         for (auto* param : *parameters) {
             this->register_child(param);
         }
