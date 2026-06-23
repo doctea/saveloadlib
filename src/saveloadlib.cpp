@@ -13,6 +13,9 @@ SL_ArenaBase* sl_setting_arena = nullptr;  // global arena for SaveableSettingBa
 char     sl_seg_pool[SL_SEG_POOL_SIZE];    // intern pool for path_segment strings
 uint16_t sl_seg_pool_used = 0;
 
+char     sl_label_pool[SL_LABEL_POOL_SIZE];  // intern pool for setting label strings
+uint16_t sl_label_pool_used = 0;
+
 // ---------------------------------------------------------------------------
 // Optional bulk file-read buffer
 // ---------------------------------------------------------------------------
@@ -254,6 +257,11 @@ void sl_notify_after_load(ISaveableSettingHost* root) {
   if (!root) return;
   root->on_after_load();
   for (uint8_t i = 0; i < root->child_count; ++i) {
+    // TODO: maybe we only want to call on_after_load() for children that actually had settings loaded into them?  
+    //      This would require tracking which children were affected during the load pass, which is more complex.
+    //      For now, we call on_after_load() for all children regardless of whether they were affected, to ensure any derived state is updated.
+    //      maybe we could add a flag to ISaveableSettingHost to indicate whether it was affected by the load, and only call on_after_load() for those that were; 
+    //      or pass the flag into the target so it can decide what to do.
     if (root->children[i].host)
       sl_notify_after_load(root->children[i].host);
   }

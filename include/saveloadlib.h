@@ -158,6 +158,9 @@ static inline uint16_t sl_fnv1a_16(const char* s) {
 
 #include "sl_arena.h"  // provides SL_ArenaBase, sl_setting_arena, sl_set_setting_arena
 
+// Forward declaration: sl_label_intern() is defined later in this file
+static inline const char* sl_label_intern(const char* lbl);
+
 struct SaveableSettingBase {
   // 4-byte pointer instead of a 48-byte inline buffer.
   // Points to arena memory, heap memory, or a string literal — see set_label() / set_label_static().
@@ -165,11 +168,22 @@ struct SaveableSettingBase {
   const char* category_name = "";  // always a string literal pointer
   uint16_t label_hash = 0;         // FNV-1a 16-bit hash of label; kept in sync by set_label/set_label_static
 
-  // Copy lbl into the arena (if active) or the heap.
+  // Copy lbl into the label intern pool (if interning succeeds), else fall back to arena/heap.
   // Safe for temporaries, stack buffers, and dynamically-built strings.
   // Uses at most SL_MAX_LABEL-1 chars + NUL.
+  // Deduplicates repeated labels (e.g., "steps", "pulses", etc. across 25 patterns).
   void set_label(const char* lbl) {
     if (!lbl || !*lbl) { label = ""; label_hash = 0; return; }
+    
+    // Try to intern the label first (deduplicates repeated strings)
+    const char* interned = sl_label_intern(lbl);
+    if (interned && *interned) {
+      label = interned;
+      label_hash = sl_fnv1a_16(label);
+      return;
+    }
+    
+    // Fallback: allocate from arena or heap (when label pool is full or label too long)
     size_t n = strlen(lbl);
     if (n >= SL_MAX_LABEL) n = SL_MAX_LABEL - 1;
     // Allocate n+1 bytes: from arena if available (fast, no heap scan), else heap.
@@ -265,22 +279,65 @@ static inline const char* sl_seg_intern(const char* seg) {
     return dst;
 }
 
-struct ISaveableSettingHost {
-  const char* path_segment = "";
-  static constexpr size_t PATH_SEG_MAX = 32;  // kept for set_path_segment_fmt local buffer
-  uint16_t seg_hash = 0;
+// ---------------------------------------------------------------------------
+// Label-string intern pool — shared storage for all setting label strings.
+// Deduplicates common labels like "steps", "pulses", "rotation", "duration"
+// across multiple setting instances (e.g., 25 patterns × 5 labels = 125 copies
+// of the same strings; interning saves ~1-2 KB).
+// ---------------------------------------------------------------------------
+#ifndef SL_LABEL_POOL_SIZE
+#define SL_LABEL_POOL_SIZE 2048
+#endif
 
+extern char     sl_label_pool[];
+extern uint16_t sl_label_pool_used;
+
+// Intern a label string. Returns pointer into pool; deduplicates identical
+// strings. Returns "" for null/empty. On overflow, returns input pointer
+// unchanged (safe for literals; prints a warning).
+// Max label size is SL_MAX_LABEL (defined in saveloadlib.h as 48 bytes).
+static inline const char* sl_label_intern(const char* lbl) {
+    if (!lbl || !lbl[0]) return "";
+    const char* p       = sl_label_pool;
+    const char* pool_end = sl_label_pool + sl_label_pool_used;
+    while (p < pool_end) {
+        if (strcmp(p, lbl) == 0) return p;
+        p += strlen(p) + 1;
+    }
+    size_t n = strlen(lbl);
+    if (n >= SL_MAX_LABEL) n = SL_MAX_LABEL - 1;
+    if ((size_t)(sl_label_pool_used + n + 1) > SL_LABEL_POOL_SIZE) {
+        if (Serial) Serial.printf("SL_WARNING: sl_label_pool full (%u/%u bytes), label '%s' not interned\n", 
+                                  sl_label_pool_used, SL_LABEL_POOL_SIZE, lbl);
+        return lbl;
+    }
+    char* dst = sl_label_pool + sl_label_pool_used;
+    memcpy(dst, lbl, n);
+    dst[n] = '\0';
+    sl_label_pool_used = (uint16_t)(sl_label_pool_used + n + 1);
+    return dst;
+}
+
+struct ISaveableSettingHost {
+  // Define child/setting entry types first, before they're used in member declarations
   struct ChildEntry   { ISaveableSettingHost* host; };
   // mask: bitmask of SL_SCOPE_* values — which save/load scopes this slot participates in.
   struct SettingEntry { SaveableSettingBase* setting; sl_scope_t mask; };
 
+  // Group pointer-sized fields first to minimize alignment padding.
+  const char* path_segment = "";
   // Arrays injected by SHStorage<NCH,NSET> — NOT owned by this base; never nullptr after construction
   ChildEntry*   children    = nullptr;
   SettingEntry* settings    = nullptr;
+  
+  // Then group uint16_t and uint8_t fields
+  uint16_t seg_hash = 0;
   uint8_t max_children      = 0;
   uint8_t max_settings      = 0;
   uint8_t child_count       = 0;
   uint8_t setting_count     = 0;
+
+  static constexpr size_t PATH_SEG_MAX = 32;  // kept for set_path_segment_fmt local buffer
 
   virtual void set_path_segment(const char* seg) {
     if (!seg) {
@@ -348,6 +405,7 @@ struct ISaveableSettingHost {
   bool saveable_settings_setup = false;
   virtual void setup_saveable_settings() {
     // default: do nothing
+    // if (Serial) Serial.printf("Base setup_saveable_settings for host '%s' (%p), free ram is %u\n", this->path_segment, this, rp2040.getFreeHeap());
   }
 
   // helper find
