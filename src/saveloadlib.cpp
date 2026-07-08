@@ -10,10 +10,17 @@ ISaveableSettingHost* SL_ROOT = nullptr;  // single definition; extern-declared 
 
 SL_ArenaBase* sl_setting_arena = nullptr;  // global arena for SaveableSettingBase::operator new
 
+// Move intern pools to EXTMEM (PSRAM) on Teensy 4.x to free RAM1 stack space.
+// Labels/segments are written once at startup then read-only; PSRAM cached
+// access is fine.  Falls back to RAM1 on platforms without EXTMEM.
+#ifdef EXTMEM
+EXTMEM char sl_seg_pool[SL_SEG_POOL_SIZE];    // intern pool for path_segment strings
+EXTMEM char sl_label_pool[SL_LABEL_POOL_SIZE];  // intern pool for setting label strings
+#else
 char     sl_seg_pool[SL_SEG_POOL_SIZE];    // intern pool for path_segment strings
-uint16_t sl_seg_pool_used = 0;
-
 char     sl_label_pool[SL_LABEL_POOL_SIZE];  // intern pool for setting label strings
+#endif
+uint16_t sl_seg_pool_used = 0;
 uint16_t sl_label_pool_used = 0;
 
 // ---------------------------------------------------------------------------
