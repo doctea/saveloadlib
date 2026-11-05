@@ -269,7 +269,7 @@ static inline const char* sl_seg_intern(const char* seg) {
     size_t n = strlen(seg);
     if (n >= 32) n = 31;  // matches PATH_SEG_MAX - 1
     if ((size_t)(sl_seg_pool_used + n + 1) > SL_SEG_POOL_SIZE) {
-        if (Serial) Serial.println(F("SL_WARNING: sl_seg_pool full, path segment not interned"));
+        if (Serial) Serial.printf("SL_WARNING: sl_seg_pool full, path segment '%s' not interned\n", seg);
         return seg;
     }
     char* dst = sl_seg_pool + sl_seg_pool_used;
@@ -347,7 +347,8 @@ struct ISaveableSettingHost {
     }
     this->path_segment = sl_seg_intern(seg);
     if (this->path_segment[0] == '\0') {
-      if (Serial) Serial.println(F("SL_WARNING: setting empty path segment for a saveable settings host may cause collisions between its children"));
+      if (Serial) 
+        Serial.println(F("SL_WARNING: setting empty path segment for a saveable settings host may cause collisions between its children"));
     }
     this->seg_hash = sl_fnv1a_16(this->path_segment);
   }

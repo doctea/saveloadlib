@@ -44,9 +44,16 @@
 //
 //   Result: 850 heap scans → 1 heap scan + 850 fast pointer increments.
 //
-// ── If DTCM is also scarce: use SL_Arena<N> in EXTMEM (still a big win) ────
+// ── If DTCM is also scarce: keep pool in EXTMEM, metadata as file-scope static ─
 //
-//   EXTMEM static SL_Arena<20000> sl_arena; // everything in EXTMEM
+//   // !! Do NOT use `EXTMEM static SL_Arena<N>` as a local static variable !!
+//   // Teensy 4.x: static-local + EXTMEM has unreliable constructor initialisation
+//   // (the EXTMEM attribute conflicts with the compiler's static-local guard
+//   // mechanism, leaving buf/capacity uninitialised).  Always use file-scope or
+//   // the split pool+SL_ArenaBase pattern shown above.
+//
+//   EXTMEM static char sl_arena_pool[20000]; // file-scope: placed by linker, safe
+//   static SL_ArenaBase sl_arena(sl_arena_pool, sizeof(sl_arena_pool));
 //   sl_set_setting_arena(&sl_arena);
 //
 //   Even here: one slow heap scan instead of 850.  The bump-pointer bookkeeping
