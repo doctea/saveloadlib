@@ -8,6 +8,7 @@
 
 #ifdef ENABLE_TESTSAVELOAD
 
+#include "shared_debug.h"
 #include "functional-vlpp.h"
 #include "LinkedList.h"
 
@@ -37,14 +38,14 @@ class TestSaveableObject : public SHStorage<0, 4> {  // 4 settings; no children
 
     // lambda callbacks to trigger save/loads
     vl::Func<void()> test_loadsave_callback = [=](void) -> void {
-        Serial.println("test_loadsave_callback callback triggered");
-        Serial.flush();
+        Serial_println("test_loadsave_callback callback triggered");
+        Serial_flush();
         // dump info to serial for verification
-        Serial.printf("int_value: %d\n", this->int_value);
-        Serial.printf("float_value: %f\n", this->float_value);
-        Serial.printf("float_proxy_source: %f\n", this->float_proxy_source);
-        Serial.printf("float_proxy_destination: %f\n", this->float_proxy_destination);
-        Serial.printf("bool_value: %d\n", this->bool_value);
+        Serial_printf("int_value: %d\n", this->int_value);
+        Serial_printf("float_value: %f\n", this->float_value);
+        Serial_printf("float_proxy_source: %f\n", this->float_proxy_source);
+        Serial_printf("float_proxy_destination: %f\n", this->float_proxy_destination);
+        Serial_printf("bool_value: %d\n", this->bool_value);
 
         // store the current settings to a LinkedList for later verification
         LinkedList<String> lines;
@@ -55,9 +56,9 @@ class TestSaveableObject : public SHStorage<0, 4> {  // 4 settings; no children
         );
 
         // print the stored lines for verification
-        Serial.println("Captured settings lines:");
+        Serial_println("Captured settings lines:");
         for (auto& line : lines) {
-            Serial.println(line);
+            Serial_println(line);
         }
 
         // randomise the settings to different values to make sure the load actually changes them back
@@ -92,34 +93,34 @@ class TestSaveableObject : public SHStorage<0, 4> {  // 4 settings; no children
         );
         // print the new captured lines for verification        Serial.println("Captured settings lines after load:");
         for (auto& line : lines_after_load) {
-            Serial.println(line);
+            Serial_println(line);
         }
         // compare the two lists        
         bool match = true;
         if (lines.size() != lines_after_load.size()) {
-            Serial.println("Mismatch in number of lines before save and after load!");
+            Serial_println("Mismatch in number of lines before save and after load!");
             match = false;
         } else {
             int i = 0;
             auto it_a = lines.begin(), it_b = lines_after_load.begin();
             for (; it_a != lines.end() && it_b != lines_after_load.end(); ++it_a, ++it_b, ++i) {
                 if (*it_a != *it_b) {
-                    Serial.printf("Mismatch in line %d: before '%s' vs after '%s'\n", i, (*it_a).c_str(), (*it_b).c_str());
+                    Serial_printf("Mismatch in line %d: before '%s' vs after '%s'\n", i, (*it_a).c_str(), (*it_b).c_str());
                     match = false;
                 }
             }
         }
         if (match) {
-            Serial.println("Success: settings lines match before save and after load!");
+            Serial_println("Success: settings lines match before save and after load!");
         } else {
-            Serial.println("Failure: settings lines do not match before save and after load!");
+            Serial_println("Failure: settings lines do not match before save and after load!");
         }
     };
 
     ParameterList *parameters = nullptr;
 
     TestSaveableObject() {
-        Serial.println("Constructing TestSaveableObject");
+        Serial_println("Constructing TestSaveableObject");
         this->set_path_segment("TestObject");
     }
 

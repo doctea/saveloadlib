@@ -2,6 +2,7 @@
 
 #if defined(ENABLE_SD) || defined(ENABLE_LITTLEFS)
 
+#include "shared_debug.h"
 #include "saveloadlib.h"
 
 const char *warning_label = " - WARNING: no target nor getter func!";
@@ -477,7 +478,7 @@ static bool sl_validate_tree_recursive(ISaveableSettingHost* host, Print& out, u
   bool ok = true;
   const char* seg = (host->path_segment && host->path_segment[0]) ? host->path_segment : "(root)";
 
-  Serial.printf("SL_VALIDATE: checking node at depth %u named '%s'...\n", depth, seg);
+  Serial_printf("SL_VALIDATE: checking node at depth %u named '%s'...\n", depth, seg);
 
   if (!host->path_segment || host->path_segment[0] == '\0') {
     out.printf("SL_VALIDATE WARNING [depth %u] @unknown: empty path segment - this node will be inaccessible via saveloadlib and won't be saved/loaded\n", depth);
@@ -531,36 +532,41 @@ bool sl_validate_tree(ISaveableSettingHost* root, Print& out) {
 }
 
 void debug_print_file(const char *filename) {
+    if (!FOUNDLING_SERIAL_CONNECTED) return;
   // for some reason we still get that fucking problem where the system freezes when we try to 
   // output lots of serial :/ especially when the app is running, rather than during setup()..
   // tried atomic, yielding, waiting for avail, delays, flushing... nothing seems to fix it
   // dont know what else to try!
   // ATOMIC() {
-    Serial.printf("debug_print_file: Attempting to open file '%s' for reading...\n", filename);
+    Serial_printf("debug_print_file: Attempting to open file '%s' for reading...\n", filename);
     // //Serial.flush();
     #ifdef ENABLE_SD
       File f = SD.open(filename, FILE_READ);
     #elif defined(ENABLE_LITTLEFS)
       File f = LittleFS.open(filename, "r");
     #else
-      Serial.println("No filesystem enabled for debug_print_file");
+      Serial_println("No filesystem enabled for debug_print_file");
       return;
     #endif
 
     if (f) {
-      Serial.print("###\ndebug_print_file showing contents of ");
-      Serial.println(filename);
-      while (f.available()) {
-          Serial.write(f.read());
-          //delay(1);
-          //yield();
-          //Serial.flush();
+      foundling::SerialPacket packet;
+      if (packet) {
+        packet.print("###\ndebug_print_file showing contents of ");
+        packet.println(filename);
+        uint8_t buffer[128];
+        while (packet && f.available()) {
+          const int count = f.read(buffer, sizeof(buffer));
+          if (count <= 0) break;
+          packet.write(buffer, (size_t)count);
+        }
+        packet.printf("debug_print_file: Finished showing contents of %s\n", filename);
+        packet.finish();
       }
       f.close();
-      Serial.printf("debug_print_file: Finished showing contents of %s\n", filename);
       //Serial.flush();
     } else {
-      Serial.printf("debug_print_file: File '%s' does not exist\n", filename);
+      Serial_printf("debug_print_file: File '%s' does not exist\n", filename);
       //Serial.flush();
     }
   // }

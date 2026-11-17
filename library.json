@@ -1,6 +1,7 @@
 { 
 	"name": "saveloadlib",
 	"version": "0.1.5",
+	"dependencies": { "foundling": "*" },
 	"repository":
 	{
 		"type": "git",

@@ -85,6 +85,7 @@
 //   settings only from setup(), not from ISRs or multiple threads.
 
 #pragma once
+#include "shared_debug.h"
 #include <stddef.h>
 
 // ---------------------------------------------------------------------------
@@ -130,7 +131,7 @@ struct SL_ArenaBase {
     T* make(Args&&... args) {
         void* mem = allocate(sizeof(T), alignof(T));
         if (!mem) {
-            if (Serial) Serial.printf(
+            Serial_printf(
                 "SL_Arena: out of space allocating %u bytes (%u/%u used)\n",
                 (unsigned)sizeof(T), (unsigned)used, (unsigned)capacity);
             return nullptr;

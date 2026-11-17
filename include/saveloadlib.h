@@ -1,6 +1,7 @@
 // saveloadlib.h
 // this version is based on code from copilot suggestions.
 #pragma once
+#include "shared_debug.h"
 #include <Arduino.h>
 
 // Native test stubs may not provide a full Print type definition.
@@ -195,8 +196,8 @@ struct SaveableSettingBase {
     else {
       // Arena (or heap) is full — borrow the incoming pointer as a last resort.
       // This is unsafe if lbl is a temporary, but avoids a crash.
-      if (sl_setting_arena && Serial)
-        Serial.printf("SL_Arena: full, falling back to borrowed pointer for label '%s' (%u bytes)\n",
+      if (sl_setting_arena)
+        Warn_printf("SL_Arena: full, falling back to borrowed pointer for label '%s' (%u bytes)\n",
                       lbl, (unsigned)(n + 1));
       label = lbl;
     }
@@ -229,7 +230,7 @@ struct SaveableSettingBase {
     if (sl_setting_arena) {
       void* p = sl_setting_arena->allocate(sz, 8u); // 8-byte align: safe for any member type
       if (p) return p;
-      if (Serial) Serial.printf("SL_Arena: full, falling back to heap for %u bytes\n", (unsigned)sz);
+      Serial_printf("SL_Arena: full, falling back to heap for %u bytes\n", (unsigned)sz);
     }
     return ::operator new(sz);
   }
@@ -269,7 +270,7 @@ static inline const char* sl_seg_intern(const char* seg) {
     size_t n = strlen(seg);
     if (n >= 32) n = 31;  // matches PATH_SEG_MAX - 1
     if ((size_t)(sl_seg_pool_used + n + 1) > SL_SEG_POOL_SIZE) {
-        if (Serial) Serial.printf("SL_WARNING: sl_seg_pool full, path segment '%s' not interned\n", seg);
+        Serial_printf("SL_WARNING: sl_seg_pool full, path segment '%s' not interned\n", seg);
         return seg;
     }
     char* dst = sl_seg_pool + sl_seg_pool_used;
@@ -307,7 +308,7 @@ static inline const char* sl_label_intern(const char* lbl) {
     size_t n = strlen(lbl);
     if (n >= SL_MAX_LABEL) n = SL_MAX_LABEL - 1;
     if ((size_t)(sl_label_pool_used + n + 1) > SL_LABEL_POOL_SIZE) {
-        if (Serial) Serial.printf("SL_WARNING: sl_label_pool full (%u/%u bytes), label '%s' not interned\n", 
+        Serial_printf("SL_WARNING: sl_label_pool full (%u/%u bytes), label '%s' not interned\n",
                                   sl_label_pool_used, SL_LABEL_POOL_SIZE, lbl);
         return lbl;
     }
@@ -347,8 +348,7 @@ struct ISaveableSettingHost {
     }
     this->path_segment = sl_seg_intern(seg);
     if (this->path_segment[0] == '\0') {
-      if (Serial) 
-        Serial.println(F("SL_WARNING: setting empty path segment for a saveable settings host may cause collisions between its children"));
+      Warn_println("SL_WARNING: empty path segment may cause collisions between child settings");
     }
     this->seg_hash = sl_fnv1a_16(this->path_segment);
   }
@@ -373,7 +373,7 @@ struct ISaveableSettingHost {
       children[child_count].host = child;
       child_count++;
     } else if (child_count >= max_children) {
-      if (Serial) Serial.printf("SL_WARNING: failed to register_child with path segment '%s' in host '%s' - max children of %i reached\n", child ? child->path_segment : "null", this->path_segment, max_children);
+      Serial_printf("SL_WARNING: failed to register_child with path segment '%s' in host '%s' - max children of %i reached\n", child ? child->path_segment : "null", this->path_segment, max_children);
     }
   }
   // Register a saveable setting slot.
@@ -398,7 +398,7 @@ struct ISaveableSettingHost {
     }
 
     // no space
-    Serial.printf("SL_WARNING: failed to register setting '%s' in host '%s' - max settings of %i reached\n", setting->label, this->path_segment, max_settings);
+    Serial_printf("SL_WARNING: failed to register setting '%s' in host '%s' - max settings of %i reached\n", setting->label, this->path_segment, max_settings);
     return false;
   }
 
